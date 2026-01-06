@@ -1,74 +1,52 @@
-import { useState } from "react";
 import Header from "@/components/Header";
 import PromptInput from "@/components/PromptInput";
 import ImageDisplay from "@/components/ImageDisplay";
 import LoadingState from "@/components/LoadingState";
 import { useToast } from "@/hooks/use-toast";
-
-interface GeneratedImage {
-  url: string;
-  prompt: string;
-}
+import { useMidjourney } from "@/hooks/useMidjourney";
+import { useEffect } from "react";
 
 const Index = () => {
-  const [isLoading, setIsLoading] = useState(false);
-  const [isUpscaling, setIsUpscaling] = useState(false);
-  const [generatedImage, setGeneratedImage] = useState<GeneratedImage | null>(null);
   const { toast } = useToast();
+  const { 
+    imageUrl, 
+    status, 
+    progress, 
+    error, 
+    generate, 
+    reset, 
+    isLoading 
+  } = useMidjourney();
 
-  const handleGenerate = async (prompt: string) => {
-    setIsLoading(true);
-    
-    try {
-      // TODO: Replace with actual Midjourney webhook integration
-      // For now, simulate with a placeholder response
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      
-      // Placeholder image for demo
-      setGeneratedImage({
-        url: `https://picsum.photos/seed/${Date.now()}/1024/1024`,
-        prompt,
-      });
-      
+  useEffect(() => {
+    if (status === 'completed' && imageUrl) {
       toast({
         title: "Image generated!",
         description: "Your creation is ready.",
       });
-    } catch (error) {
+    }
+    if (status === 'failed' && error) {
       toast({
         title: "Generation failed",
-        description: "Please try again later.",
+        description: error,
         variant: "destructive",
       });
-    } finally {
-      setIsLoading(false);
     }
+  }, [status, imageUrl, error, toast]);
+
+  const handleGenerate = (prompt: string) => {
+    generate(prompt);
   };
 
-  const handleUpscale = async () => {
-    setIsUpscaling(true);
-    
-    try {
-      // TODO: Implement upscale via webhook
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      toast({
-        title: "Upscale complete!",
-        description: "Your image has been enhanced.",
-      });
-    } catch (error) {
-      toast({
-        title: "Upscale failed",
-        description: "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsUpscaling(false);
-    }
+  const handleUpscale = () => {
+    toast({
+      title: "Upscale coming soon",
+      description: "This feature will be available once you have a generated image.",
+    });
   };
 
   const handleNewImage = () => {
-    setGeneratedImage(null);
+    reset();
   };
 
   return (
@@ -83,20 +61,20 @@ const Index = () => {
         <div className="space-y-12 sm:space-y-16">
           <Header />
           
-          {!generatedImage && !isLoading && (
+          {status === 'idle' && (
             <PromptInput onGenerate={handleGenerate} isLoading={isLoading} />
           )}
           
-          {isLoading && <LoadingState />}
+          {isLoading && <LoadingState progress={progress} />}
           
-          {generatedImage && !isLoading && (
+          {status === 'completed' && imageUrl && (
             <>
               <ImageDisplay
-                imageUrl={generatedImage.url}
-                prompt={generatedImage.prompt}
+                imageUrl={imageUrl}
+                prompt=""
                 onUpscale={handleUpscale}
                 onNewImage={handleNewImage}
-                isUpscaling={isUpscaling}
+                isUpscaling={false}
               />
               
               <PromptInput onGenerate={handleGenerate} isLoading={isLoading} />

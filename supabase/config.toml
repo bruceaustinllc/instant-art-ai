@@ -1,1 +1,4 @@
 project_id = "euhevsyahruqehiqgway"
+
+[functions.midjourney-generate]
+verify_jwt = false
