@@ -20,22 +20,19 @@ serve(async (req) => {
 
     console.log('Request received:', { action, prompt, taskId });
 
-    // Using GoAPI Midjourney API (most reliable third-party service)
-    const baseUrl = 'https://api.goapi.ai/mj/v2';
+    // Using Legnext AI API (replacement for GoAPI)
+    const baseUrl = 'https://api.legnext.ai/api';
 
     if (action === 'imagine') {
       // Generate new image
-      const response = await fetch(`${baseUrl}/imagine`, {
+      const response = await fetch(`${baseUrl}/v1/diffusion`, {
         method: 'POST',
         headers: {
-          'X-API-Key': MIDJOURNEY_API_KEY,
+          'x-api-key': MIDJOURNEY_API_KEY,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          prompt: prompt,
-          process_mode: 'fast',
-          webhook_endpoint: '',
-          webhook_secret: '',
+          text: prompt,
         }),
       });
 
@@ -47,7 +44,7 @@ serve(async (req) => {
       }
 
       return new Response(JSON.stringify({ 
-        taskId: data.task_id,
+        taskId: data.job_id,
         status: 'processing'
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -55,16 +52,12 @@ serve(async (req) => {
     }
 
     if (action === 'status') {
-      // Check task status
-      const response = await fetch(`${baseUrl}/fetch`, {
-        method: 'POST',
+      // Check task status using Legnext task endpoint
+      const response = await fetch(`${baseUrl}/v1/task/${taskId}`, {
+        method: 'GET',
         headers: {
-          'X-API-Key': MIDJOURNEY_API_KEY,
-          'Content-Type': 'application/json',
+          'x-api-key': MIDJOURNEY_API_KEY,
         },
-        body: JSON.stringify({
-          task_id: taskId,
-        }),
       });
 
       const data = await response.json();
@@ -74,43 +67,32 @@ serve(async (req) => {
         throw new Error(data.message || 'Failed to fetch task status');
       }
 
+      // Map Legnext status to our format
+      let status = data.status;
+      if (status === 'completed' || status === 'success') {
+        status = 'completed';
+      } else if (status === 'failed' || status === 'error') {
+        status = 'failed';
+      } else {
+        status = 'processing';
+      }
+
       return new Response(JSON.stringify({
-        status: data.status,
-        progress: data.progress || 0,
-        imageUrl: data.task_result?.image_url || null,
-        buttons: data.task_result?.actions || [],
+        status: status,
+        progress: data.status === 'completed' ? 100 : 50,
+        imageUrl: data.output?.image_url || null,
+        buttons: [],
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     if (action === 'upscale') {
-      // Upscale an image
-      const { button } = await req.json();
-      
-      const response = await fetch(`${baseUrl}/action`, {
-        method: 'POST',
-        headers: {
-          'X-API-Key': MIDJOURNEY_API_KEY,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          task_id: taskId,
-          action: button,
-        }),
-      });
-
-      const data = await response.json();
-      console.log('Upscale response:', data);
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Failed to upscale image');
-      }
-
+      // Legnext may have different upscale endpoint - for now return not supported
       return new Response(JSON.stringify({ 
-        taskId: data.task_id,
-        status: 'processing'
+        error: 'Upscale not yet implemented for Legnext API'
       }), {
+        status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
