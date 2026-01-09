@@ -11,86 +11,80 @@ serve(async (req) => {
   }
 
   try {
-    const { prompt, action, taskId } = await req.json();
-    const MIDJOURNEY_API_KEY = Deno.env.get('MIDJOURNEY_API_KEY');
+    const { prompt, action } = await req.json();
+    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
     
-    if (!MIDJOURNEY_API_KEY) {
-      throw new Error('MIDJOURNEY_API_KEY is not configured');
+    if (!LOVABLE_API_KEY) {
+      throw new Error('LOVABLE_API_KEY is not configured');
     }
 
-    console.log('Request received:', { action, prompt, taskId });
-
-    // Using Legnext AI API (replacement for GoAPI)
-    const baseUrl = 'https://api.legnext.ai/api';
+    console.log('Request received:', { action, prompt });
 
     if (action === 'imagine') {
-      // Generate new image
-      const response = await fetch(`${baseUrl}/v1/diffusion`, {
+      // Generate image using Lovable AI Gateway with Gemini image model
+      const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
         method: 'POST',
         headers: {
-          'x-api-key': MIDJOURNEY_API_KEY,
+          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          text: prompt,
+          model: 'google/gemini-2.5-flash-image-preview',
+          messages: [
+            {
+              role: 'user',
+              content: prompt,
+            }
+          ],
+          modalities: ['image', 'text'],
         }),
       });
 
       const data = await response.json();
-      console.log('Imagine response:', data);
+      console.log('Lovable AI response status:', response.status);
 
       if (!response.ok) {
-        throw new Error(data.message || 'Failed to start image generation');
+        if (response.status === 429) {
+          throw new Error('Rate limit exceeded. Please try again in a moment.');
+        }
+        if (response.status === 402) {
+          throw new Error('Usage limit reached. Please add credits to continue.');
+        }
+        console.error('AI gateway error:', data);
+        throw new Error(data.error?.message || 'Failed to generate image');
       }
 
+      // Extract the image from the response
+      const imageData = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+      
+      if (!imageData) {
+        console.error('No image in response:', JSON.stringify(data));
+        throw new Error('No image was generated. Please try a different prompt.');
+      }
+
+      // Return the image directly (it's already a data URL)
       return new Response(JSON.stringify({ 
-        taskId: data.job_id,
-        status: 'processing'
+        status: 'completed',
+        imageUrl: imageData,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
+    // For status checks, since Lovable AI is synchronous, we don't need polling
     if (action === 'status') {
-      // Check task status using Legnext task endpoint
-      const response = await fetch(`${baseUrl}/v1/task/${taskId}`, {
-        method: 'GET',
-        headers: {
-          'x-api-key': MIDJOURNEY_API_KEY,
-        },
-      });
-
-      const data = await response.json();
-      console.log('Status response:', data);
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Failed to fetch task status');
-      }
-
-      // Map Legnext status to our format
-      let status = data.status;
-      if (status === 'completed' || status === 'success') {
-        status = 'completed';
-      } else if (status === 'failed' || status === 'error') {
-        status = 'failed';
-      } else {
-        status = 'processing';
-      }
-
       return new Response(JSON.stringify({
-        status: status,
-        progress: data.status === 'completed' ? 100 : 50,
-        imageUrl: data.output?.image_url || null,
-        buttons: [],
+        status: 'completed',
+        progress: 100,
+        imageUrl: null,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     if (action === 'upscale') {
-      // Legnext may have different upscale endpoint - for now return not supported
       return new Response(JSON.stringify({ 
-        error: 'Upscale not yet implemented for Legnext API'
+        error: 'Upscale is not available with this image generation model'
       }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -103,7 +97,7 @@ serve(async (req) => {
     });
 
   } catch (error) {
-    console.error('Midjourney API error:', error);
+    console.error('Image generation error:', error);
     const message = error instanceof Error ? error.message : 'Unknown error';
     return new Response(JSON.stringify({ error: message }), {
       status: 500,
