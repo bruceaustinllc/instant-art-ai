@@ -6,15 +6,20 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Loader2, Wand2, Palette, PenTool } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import BorderSelect from './BorderSelect';
+import { applyBorderToImage } from '@/lib/applyBorderToImage';
+import { getInvokeErrorMessage } from '@/lib/getInvokeErrorMessage';
+import type { BorderTemplateId } from '@/lib/pageBorders';
 
 interface PageGeneratorProps {
   bookId: string;
   onPageGenerated: (prompt: string, imageUrl: string, artStyle: string) => Promise<any>;
 }
 
-const PageGenerator = ({ bookId, onPageGenerated }: PageGeneratorProps) => {
+const PageGenerator = ({ bookId: _bookId, onPageGenerated }: PageGeneratorProps) => {
   const [prompt, setPrompt] = useState('');
   const [artStyle, setArtStyle] = useState<'line_art' | 'convert'>('line_art');
+  const [border, setBorder] = useState<BorderTemplateId>('none');
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
@@ -25,7 +30,7 @@ const PageGenerator = ({ bookId, onPageGenerated }: PageGeneratorProps) => {
     try {
       // Build the generation prompt based on art style
       let generationPrompt = prompt.trim();
-      
+
       if (artStyle === 'line_art') {
         generationPrompt = `Create a black and white coloring book page illustration of: ${prompt}. 
 Style: Clean line art with clear outlines, no shading or gradients, no filled areas, 
@@ -45,7 +50,8 @@ no shading, no filled areas, white background. Bold clear lines suitable for col
       if (data.error) throw new Error(data.error);
 
       if (data.status === 'completed' && data.imageUrl) {
-        await onPageGenerated(prompt.trim(), data.imageUrl, artStyle);
+        const imageWithBorder = await applyBorderToImage(data.imageUrl, border);
+        await onPageGenerated(prompt.trim(), imageWithBorder, artStyle);
         setPrompt('');
         toast({
           title: 'Page created!',
@@ -58,7 +64,7 @@ no shading, no filled areas, white background. Bold clear lines suitable for col
       console.error('Generation error:', err);
       toast({
         title: 'Generation failed',
-        description: err instanceof Error ? err.message : 'Failed to generate page',
+        description: getInvokeErrorMessage(err),
         variant: 'destructive',
       });
     } finally {
@@ -74,9 +80,7 @@ no shading, no filled areas, white background. Bold clear lines suitable for col
         </div>
         <div>
           <h3 className="font-semibold text-foreground">Generate New Page</h3>
-          <p className="text-sm text-muted-foreground">
-            Describe what you want on this coloring page
-          </p>
+          <p className="text-sm text-muted-foreground">Describe what you want on this coloring page</p>
         </div>
       </div>
 
@@ -105,6 +109,8 @@ no shading, no filled areas, white background. Bold clear lines suitable for col
           </RadioGroup>
         </div>
 
+        <BorderSelect value={border} onChange={setBorder} disabled={loading} />
+
         <div className="space-y-2">
           <Label htmlFor="prompt">Page Description</Label>
           <Textarea
@@ -118,11 +124,7 @@ no shading, no filled areas, white background. Bold clear lines suitable for col
           />
         </div>
 
-        <Button
-          onClick={handleGenerate}
-          disabled={loading || !prompt.trim()}
-          className="w-full glow-effect"
-        >
+        <Button onClick={handleGenerate} disabled={loading || !prompt.trim()} className="w-full glow-effect">
           {loading ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
