@@ -44,14 +44,19 @@ serve(async (req) => {
       console.log('Lovable AI response status:', response.status);
 
       if (!response.ok) {
-        if (response.status === 429) {
-          throw new Error('Rate limit exceeded. Please try again in a moment.');
-        }
-        if (response.status === 402) {
-          throw new Error('Usage limit reached. Please add credits to continue.');
-        }
-        console.error('AI gateway error:', data);
-        throw new Error(data.error?.message || 'Failed to generate image');
+        const status = response.status;
+        const message =
+          status === 429
+            ? 'Rate limit exceeded. Please try again in a moment.'
+            : status === 402
+              ? 'Usage limit reached. Please add credits to continue.'
+              : (data?.error?.message || 'Failed to generate image');
+
+        console.error('AI gateway error:', status, data);
+        return new Response(JSON.stringify({ error: message }), {
+          status,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
       }
 
       // Extract the image from the response

@@ -4,10 +4,14 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
-import { Loader2, Layers, Play, Square, AlertCircle } from 'lucide-react';
+import { Layers, Play, Square, AlertCircle } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import BorderSelect from './BorderSelect';
+import { applyBorderToImage } from '@/lib/applyBorderToImage';
+import { getInvokeErrorMessage } from '@/lib/getInvokeErrorMessage';
+import type { BorderTemplateId } from '@/lib/pageBorders';
 
 interface BatchGeneratorProps {
   bookId: string;
@@ -15,9 +19,10 @@ interface BatchGeneratorProps {
   currentPageCount: number;
 }
 
-const BatchGenerator = ({ bookId, onPageGenerated, currentPageCount }: BatchGeneratorProps) => {
+const BatchGenerator = ({ bookId: _bookId, onPageGenerated, currentPageCount: _currentPageCount }: BatchGeneratorProps) => {
   const [prompt, setPrompt] = useState('');
   const [pageCount, setPageCount] = useState(10);
+  const [border, setBorder] = useState<BorderTemplateId>('none');
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [currentPage, setCurrentPage] = useState(0);
@@ -51,7 +56,7 @@ const BatchGenerator = ({ bookId, onPageGenerated, currentPageCount }: BatchGene
       try {
         // Add variation to each prompt
         const variationPrompt = `${prompt.trim()} (Variation ${i + 1} of ${pageCount}, unique design)`;
-        
+
         const generationPrompt = `Create a black and white coloring book page illustration: ${variationPrompt}. 
 Style: Clean line art with clear outlines, no shading or gradients, no filled areas, 
 simple and bold lines suitable for coloring. White background.
@@ -65,7 +70,8 @@ The image should have intricate but not overly complex details, perfect for a co
         if (data.error) throw new Error(data.error);
 
         if (data.status === 'completed' && data.imageUrl) {
-          await onPageGenerated(`${prompt.trim()} (${i + 1})`, data.imageUrl, 'line_art');
+          const imageWithBorder = await applyBorderToImage(data.imageUrl, border);
+          await onPageGenerated(`${prompt.trim()} (${i + 1})`, imageWithBorder, 'line_art');
           successCount++;
         } else {
           throw new Error('No image generated');
@@ -74,9 +80,9 @@ The image should have intricate but not overly complex details, perfect for a co
         console.error(`Failed to generate page ${i + 1}:`, err);
         failures++;
         setFailedCount(failures);
-        
+
         // Check for rate limit or payment errors
-        const errorMsg = err instanceof Error ? err.message : '';
+        const errorMsg = getInvokeErrorMessage(err);
         if (errorMsg.includes('Rate limit') || errorMsg.includes('Usage limit') || errorMsg.includes('credits')) {
           toast({
             title: 'Generation paused',
@@ -85,21 +91,21 @@ The image should have intricate but not overly complex details, perfect for a co
           });
           break;
         }
-        
+
         // Add a small delay before retrying
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise((resolve) => setTimeout(resolve, 2000));
       }
 
       setProgress(((i + 1) / pageCount) * 100);
-      
+
       // Add delay between generations to avoid rate limiting
       if (i < pageCount - 1 && !abortRef.current) {
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        await new Promise((resolve) => setTimeout(resolve, 1500));
       }
     }
 
     setGenerating(false);
-    
+
     if (!abortRef.current && successCount > 0) {
       toast({
         title: 'Batch generation complete!',
@@ -122,21 +128,20 @@ The image should have intricate but not overly complex details, perfect for a co
         </div>
         <div>
           <h3 className="font-semibold text-foreground">Batch Generate Pages</h3>
-          <p className="text-sm text-muted-foreground">
-            Generate multiple unique variations from one prompt
-          </p>
+          <p className="text-sm text-muted-foreground">Generate multiple unique variations from one prompt</p>
         </div>
       </div>
 
       <Alert>
         <AlertCircle className="h-4 w-4" />
         <AlertDescription>
-          Each page will be a unique variation. Generation takes ~10 seconds per page.
-          You can stop at any time.
+          Each page will be a unique variation. Generation takes ~10 seconds per page. You can stop at any time.
         </AlertDescription>
       </Alert>
 
       <div className="space-y-4">
+        <BorderSelect value={border} onChange={setBorder} disabled={generating} />
+
         <div className="space-y-2">
           <Label htmlFor="batch-prompt">Base Prompt</Label>
           <Textarea
@@ -162,9 +167,7 @@ The image should have intricate but not overly complex details, perfect for a co
             disabled={generating}
             className="w-32"
           />
-          <p className="text-xs text-muted-foreground">
-            Estimated time: ~{Math.ceil(pageCount * 12 / 60)} minutes
-          </p>
+          <p className="text-xs text-muted-foreground">Estimated time: ~{Math.ceil((pageCount * 12) / 60)} minutes</p>
         </div>
 
         {generating && (
@@ -173,35 +176,21 @@ The image should have intricate but not overly complex details, perfect for a co
               <span className="text-muted-foreground">
                 Generating page {currentPage} of {pageCount}...
               </span>
-              <span className="font-medium">
-                {Math.round(progress)}%
-              </span>
+              <span className="font-medium">{Math.round(progress)}%</span>
             </div>
             <Progress value={progress} className="h-2" />
-            {failedCount > 0 && (
-              <p className="text-xs text-destructive">
-                {failedCount} page(s) failed to generate
-              </p>
-            )}
+            {failedCount > 0 && <p className="text-xs text-destructive">{failedCount} page(s) failed to generate</p>}
           </div>
         )}
 
         <div className="flex gap-3">
           {generating ? (
-            <Button
-              onClick={handleStop}
-              variant="destructive"
-              className="flex-1"
-            >
+            <Button onClick={handleStop} variant="destructive" className="flex-1">
               <Square className="mr-2 h-4 w-4" />
               Stop Generation
             </Button>
           ) : (
-            <Button
-              onClick={handleBatchGenerate}
-              disabled={!prompt.trim()}
-              className="flex-1 glow-effect"
-            >
+            <Button onClick={handleBatchGenerate} disabled={!prompt.trim()} className="flex-1 glow-effect">
               <Play className="mr-2 h-4 w-4" />
               Generate {pageCount} Pages
             </Button>
