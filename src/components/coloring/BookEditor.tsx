@@ -1,9 +1,12 @@
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, FileDown, Book } from 'lucide-react';
+import { ArrowLeft, FileDown, Book, Layers, Wand2 } from 'lucide-react';
 import { ColoringBook, BookPage } from '@/hooks/useColoringBooks';
 import PageGenerator from './PageGenerator';
+import BatchGenerator from './BatchGenerator';
 import PageGallery from './PageGallery';
 import PDFExporter from './PDFExporter';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface BookEditorProps {
   book: ColoringBook;
@@ -22,6 +25,8 @@ const BookEditor = ({
   onDeletePage,
   onReorderPages,
 }: BookEditorProps) => {
+  const [generatorTab, setGeneratorTab] = useState('single');
+
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -49,13 +54,38 @@ const BookEditor = ({
         </div>
       </div>
 
-      {/* Page Generator */}
-      <PageGenerator
-        bookId={book.id}
-        onPageGenerated={(prompt, imageUrl, artStyle) => 
-          onAddPage(prompt, imageUrl, artStyle)
-        }
-      />
+      {/* Page Generators with Tabs */}
+      <Tabs value={generatorTab} onValueChange={setGeneratorTab} className="w-full">
+        <TabsList className="grid w-full grid-cols-2 max-w-md">
+          <TabsTrigger value="single" className="flex items-center gap-2">
+            <Wand2 className="h-4 w-4" />
+            Single Page
+          </TabsTrigger>
+          <TabsTrigger value="batch" className="flex items-center gap-2">
+            <Layers className="h-4 w-4" />
+            Batch Generate
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="single" className="mt-4">
+          <PageGenerator
+            bookId={book.id}
+            onPageGenerated={(prompt, imageUrl, artStyle) => 
+              onAddPage(prompt, imageUrl, artStyle)
+            }
+          />
+        </TabsContent>
+
+        <TabsContent value="batch" className="mt-4">
+          <BatchGenerator
+            bookId={book.id}
+            currentPageCount={pages.length}
+            onPageGenerated={(prompt, imageUrl, artStyle) => 
+              onAddPage(prompt, imageUrl, artStyle)
+            }
+          />
+        </TabsContent>
+      </Tabs>
 
       {/* Page Gallery */}
       <PageGallery
