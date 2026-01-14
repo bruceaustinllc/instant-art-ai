@@ -12,71 +12,68 @@ serve(async (req) => {
 
   try {
     const { prompt, action } = await req.json();
-    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+    const HF_API_TOKEN = Deno.env.get('HF_API_TOKEN'); // New environment variable
     
-    if (!LOVABLE_API_KEY) {
-      throw new Error('LOVABLE_API_KEY is not configured');
+    if (!HF_API_TOKEN) {
+      throw new Error('HF_API_TOKEN is not configured. Please set it in your Supabase project secrets.');
     }
 
     console.log('Request received:', { action, prompt });
 
     if (action === 'imagine') {
-      // Generate image using Lovable AI Gateway with Gemini image model
-      const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      // Generate image using Hugging Face Inference API with a Stable Diffusion model
+      const response = await fetch('https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+          'Authorization': `Bearer ${HF_API_TOKEN}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'google/gemini-2.5-flash-image-preview',
-          messages: [
-            {
-              role: 'user',
-              content: prompt,
-            }
-          ],
-          modalities: ['image', 'text'],
+          inputs: prompt,
+          options: {
+            wait_for_model: true, // Wait if the model is loading
+          },
         }),
       });
 
-      const data = await response.json();
-      console.log('Lovable AI response status:', response.status);
-
       if (!response.ok) {
-        const status = response.status;
-        const message =
-          status === 429
-            ? 'Rate limit exceeded. Please try again in a moment.'
-            : status === 402
-              ? 'Usage limit reached. Please add credits to continue.'
-              : (data?.error?.message || 'Failed to generate image');
-
-        console.error('AI gateway error:', status, data);
+        const errorText = await response.text();
+        console.error('Hugging Face API error:', response.status, errorText);
+        let message = 'Failed to generate image from Hugging Face.';
+        if (response.status === 503) {
+          message = 'Hugging Face model is currently loading or busy. Please try again in a moment.';
+        } else if (response.status === 401) {
+          message = 'Invalid Hugging Face API token. Please check your HF_API_TOKEN.';
+        }
         return new Response(JSON.stringify({ error: message }), {
-          status,
+          status: response.status,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
-      // Extract the image from the response
-      const imageData = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+      // Hugging Face returns an image blob directly
+      const imageBlob = await response.blob();
+      const reader = new FileReader();
+      const dataUrlPromise = new Promise<string>((resolve) => {
+        reader.onloadend = () => resolve(reader.result as string);
+      });
+      reader.readAsDataURL(imageBlob);
+      const imageDataUrl = await dataUrlPromise;
       
-      if (!imageData) {
-        console.error('No image in response:', JSON.stringify(data));
+      if (!imageDataUrl) {
+        console.error('No image data in response from Hugging Face.');
         throw new Error('No image was generated. Please try a different prompt.');
       }
 
-      // Return the image directly (it's already a data URL)
       return new Response(JSON.stringify({ 
         status: 'completed',
-        imageUrl: imageData,
+        imageUrl: imageDataUrl,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    // For status checks, since Lovable AI is synchronous, we don't need polling
+    // For status checks, since Hugging Face Inference API is synchronous, we don't need polling
     if (action === 'status') {
       return new Response(JSON.stringify({
         status: 'completed',

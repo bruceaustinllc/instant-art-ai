@@ -3,7 +3,6 @@ import { Card } from '@/components/ui/card';
 import { ColoringBook, BookPage } from '@/hooks/useColoringBooks';
 import { Image, Ruler, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 
 interface PDFPreviewProps {
   book: ColoringBook;
@@ -99,7 +98,7 @@ const PDFPreview = ({ book, pages }: PDFPreviewProps) => {
 
   const createColoringPagePreview = async (page: BookPage): Promise<string> => {
     return new Promise((resolve) => {
-      const img = document.createElement('img'); // Changed from new Image()
+      const img = document.createElement('img');
       img.crossOrigin = 'anonymous';
       img.onload = () => {
         const canvas = document.createElement('canvas');

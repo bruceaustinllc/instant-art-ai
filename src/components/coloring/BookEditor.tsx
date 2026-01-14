@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, FileDown, Book, Layers, Wand2, Settings, Upload } from 'lucide-react';
+import { ArrowLeft, Book, Layers, Wand2, Settings, Upload } from 'lucide-react';
 import { ColoringBook, BookPage } from '@/hooks/useColoringBooks';
 import PageGenerator from './PageGenerator';
 import BatchGenerator from './BatchGenerator';
 import PageGallery from './PageGallery';
 import PDFExporter from './PDFExporter';
-import BookSettingsDialog from './BookSettingsDialog'; // New import
-import PDFPreview from './PDFPreview'; // New import
+import BookSettingsDialog from './BookSettingsDialog';
+import PDFPreview from './PDFPreview';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface BookEditorProps {
@@ -17,7 +17,7 @@ interface BookEditorProps {
   onAddPage: (prompt: string, imageUrl: string, artStyle: string) => Promise<any>;
   onDeletePage: (pageId: string) => void;
   onReorderPages: (pages: BookPage[]) => void;
-  onUpdateBook: (bookId: string, updates: Partial<ColoringBook>) => Promise<any>; // New prop
+  onUpdateBook: (bookId: string, updates: Partial<ColoringBook>) => Promise<any>;
 }
 
 const BookEditor = ({
