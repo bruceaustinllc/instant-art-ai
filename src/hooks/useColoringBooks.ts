@@ -6,7 +6,10 @@ export interface ColoringBook {
   id: string;
   user_id: string;
   title: string;
+  subtitle: string | null; // New field for series subtitle
   description: string | null;
+  author_name: string | null; // New field for author name
+  copyright_text: string | null; // New field for copyright information
   page_size: string;
   status: string;
   created_at: string;
@@ -59,6 +62,9 @@ export const useColoringBooks = () => {
           title,
           description,
           page_size: '8.5x11',
+          subtitle: null, // Default new fields
+          author_name: user.email || null, // Default author to user email
+          copyright_text: `© ${new Date().getFullYear()} ${user.email || 'Your Name'}`, // Default copyright
         })
         .select()
         .single();
@@ -73,13 +79,35 @@ export const useColoringBooks = () => {
     }
   }, [user]);
 
+  const updateBook = useCallback(async (bookId: string, updates: Partial<Omit<ColoringBook, 'id' | 'user_id' | 'created_at'>>) => {
+    if (!user) return null;
+    try {
+      const { data, error } = await supabase
+        .from('coloring_books')
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .eq('id', bookId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      setBooks(prev => prev.map(b => b.id === bookId ? data : b));
+      if (currentBook?.id === bookId) {
+        setCurrentBook(data);
+      }
+      return data;
+    } catch (err) {
+      console.error('Error updating book:', err);
+      return null;
+    }
+  }, [user, currentBook]);
+
   const selectBook = useCallback(async (bookId: string) => {
     const book = books.find(b => b.id === bookId);
     if (book) {
       setCurrentBook(book);
       await fetchPages(bookId);
     }
-  }, [books]);
+  }, [books, fetchPages]);
 
   const fetchPages = useCallback(async (bookId: string) => {
     try {
@@ -137,7 +165,7 @@ export const useColoringBooks = () => {
         .eq('id', pageId);
 
       if (error) throw error;
-      setPages(prev => prev.filter(p => p.id !== pageId));
+      setPages(prev => prev.filter(p => p.id !== pageId).map((p, idx) => ({ ...p, page_number: idx + 1 })));
     } catch (err) {
       console.error('Error deleting page:', err);
     }
@@ -165,7 +193,7 @@ export const useColoringBooks = () => {
     try {
       const { error } = await supabase
         .from('coloring_books')
-        .update({ status })
+        .update({ status, updated_at: new Date().toISOString() })
         .eq('id', bookId);
 
       if (error) throw error;
@@ -196,6 +224,7 @@ export const useColoringBooks = () => {
     loading,
     fetchBooks,
     createBook,
+    updateBook,
     selectBook,
     addPage,
     deletePage,

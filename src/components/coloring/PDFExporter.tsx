@@ -12,6 +12,8 @@ import { FileDown, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { ColoringBook, BookPage } from '@/hooks/useColoringBooks';
 import { useToast } from '@/hooks/use-toast';
 import jsPDF from 'jspdf';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 
 interface PDFExporterProps {
   book: ColoringBook;
@@ -24,14 +26,15 @@ const KDP_SPECS = {
   pageHeight: 11.25, // 11 + 0.125 bleed on each side
   bleed: 0.125,
   safeMargin: 0.375, // 0.25" margin + 0.125" bleed = 0.375" from edge
-  contentWidth: 8.0, // Safe content area
-  contentHeight: 10.5, // Safe content area
+  contentWidth: 8.5 - 2 * 0.25, // 8.0 inches
+  contentHeight: 11 - 2 * 0.25, // 10.5 inches
 };
 
 const PDFExporter = ({ book, pages }: PDFExporterProps) => {
   const [open, setOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [singleSided, setSingleSided] = useState(false); // New state for single-sided printing
   const { toast } = useToast();
 
   const exportPDF = async () => {
@@ -48,54 +51,78 @@ const PDFExporter = ({ book, pages }: PDFExporterProps) => {
     setProgress(0);
 
     try {
-      // Create PDF with bleed dimensions (in inches, converted to points)
       const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'in',
         format: [KDP_SPECS.pageWidth, KDP_SPECS.pageHeight],
       });
 
-      // Process each page
+      let currentPageIndex = 0;
+
+      // Add Title Page
+      pdf.addPage([KDP_SPECS.pageWidth, KDP_SPECS.pageHeight]);
+      pdf.setFillColor(255, 255, 255);
+      pdf.rect(0, 0, KDP_SPECS.pageWidth, KDP_SPECS.pageHeight, 'F');
+      pdf.setTextColor(0); // Black text for print
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(36);
+      pdf.text(book.title, KDP_SPECS.pageWidth / 2, KDP_SPECS.pageHeight / 2 - 1, { align: 'center' });
+      if (book.subtitle) {
+        pdf.setFontSize(24);
+        pdf.setFont('helvetica', 'normal');
+        pdf.text(book.subtitle, KDP_SPECS.pageWidth / 2, KDP_SPECS.pageHeight / 2 + 0.2, { align: 'center' });
+      }
+      if (book.author_name) {
+        pdf.setFontSize(18);
+        pdf.setFont('helvetica', 'italic');
+        pdf.text(`By ${book.author_name}`, KDP_SPECS.pageWidth / 2, KDP_SPECS.pageHeight / 2 + 1.5, { align: 'center' });
+      }
+      currentPageIndex++;
+
+      // Add Copyright Page (if content exists)
+      if (book.copyright_text) {
+        pdf.addPage([KDP_SPECS.pageWidth, KDP_SPECS.pageHeight]);
+        pdf.setFillColor(255, 255, 255);
+        pdf.rect(0, 0, KDP_SPECS.pageWidth, KDP_SPECS.pageHeight, 'F');
+        pdf.setTextColor(0);
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(10);
+        pdf.text(book.copyright_text, KDP_SPECS.pageWidth / 2, KDP_SPECS.pageHeight - KDP_SPECS.safeMargin, { align: 'center' });
+        currentPageIndex++;
+      }
+
+      // Process each coloring page
       for (let i = 0; i < pages.length; i++) {
         const page = pages[i];
         setProgress(Math.round(((i + 1) / pages.length) * 100));
 
-        if (i > 0) {
-          pdf.addPage([KDP_SPECS.pageWidth, KDP_SPECS.pageHeight]);
-        }
-
-        // Add white background
+        pdf.addPage([KDP_SPECS.pageWidth, KDP_SPECS.pageHeight]);
         pdf.setFillColor(255, 255, 255);
         pdf.rect(0, 0, KDP_SPECS.pageWidth, KDP_SPECS.pageHeight, 'F');
+        currentPageIndex++;
 
         try {
-          // Load and add image
           const imgData = await loadImage(page.image_url);
           
-          // Calculate image dimensions to fit content area while maintaining aspect ratio
           const imgAspect = imgData.width / imgData.height;
           const contentAspect = KDP_SPECS.contentWidth / KDP_SPECS.contentHeight;
           
           let imgWidth, imgHeight, imgX, imgY;
           
           if (imgAspect > contentAspect) {
-            // Image is wider than content area
             imgWidth = KDP_SPECS.contentWidth;
             imgHeight = imgWidth / imgAspect;
           } else {
-            // Image is taller than content area
             imgHeight = KDP_SPECS.contentHeight;
             imgWidth = imgHeight * imgAspect;
           }
           
-          // Center the image in the safe content area
-          imgX = KDP_SPECS.bleed + (KDP_SPECS.pageWidth - 2 * KDP_SPECS.bleed - imgWidth) / 2;
-          imgY = KDP_SPECS.bleed + (KDP_SPECS.pageHeight - 2 * KDP_SPECS.bleed - imgHeight) / 2;
+          imgX = KDP_SPECS.bleed + (KDP_SPECS.contentWidth - imgWidth) / 2;
+          imgY = KDP_SPECS.bleed + (KDP_SPECS.contentHeight - imgHeight) / 2;
 
           pdf.addImage(imgData.data, 'PNG', imgX, imgY, imgWidth, imgHeight);
         } catch (imgError) {
           console.error('Error loading image for page', i + 1, imgError);
-          // Add placeholder text if image fails
           pdf.setFontSize(14);
           pdf.setTextColor(150);
           pdf.text(
@@ -105,17 +132,22 @@ const PDFExporter = ({ book, pages }: PDFExporterProps) => {
             { align: 'center' }
           );
         }
+
+        // Add blank page for single-sided printing if not the last page
+        if (singleSided && i < pages.length - 1) {
+          pdf.addPage([KDP_SPECS.pageWidth, KDP_SPECS.pageHeight]);
+          pdf.setFillColor(255, 255, 255);
+          pdf.rect(0, 0, KDP_SPECS.pageWidth, KDP_SPECS.pageHeight, 'F');
+          currentPageIndex++;
+        }
       }
 
-      // Generate filename
       const filename = `${book.title.replace(/[^a-z0-9]/gi, '_')}_KDP_Interior.pdf`;
-      
-      // Download PDF
       pdf.save(filename);
 
       toast({
         title: 'PDF exported successfully!',
-        description: `${pages.length} pages exported with KDP bleed margins.`,
+        description: `${pages.length} coloring pages exported with KDP bleed margins.`,
       });
 
       setOpen(false);
@@ -132,18 +164,15 @@ const PDFExporter = ({ book, pages }: PDFExporterProps) => {
     }
   };
 
-  // Helper function to load image and get dimensions
   const loadImage = (url: string): Promise<{ data: string; width: number; height: number }> => {
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
       
       img.onload = () => {
-        // If it's already a data URL, use it directly
         if (url.startsWith('data:')) {
           resolve({ data: url, width: img.width, height: img.height });
         } else {
-          // Convert to data URL
           const canvas = document.createElement('canvas');
           canvas.width = img.width;
           canvas.height = img.height;
@@ -198,7 +227,7 @@ const PDFExporter = ({ book, pages }: PDFExporterProps) => {
                 <li>• Bleed margins: 0.125" on all sides</li>
                 <li>• Total document size: 8.75 × 11.25 inches</li>
                 <li>• Safe content area: 8 × 10.5 inches</li>
-                <li>• {pages.length} {pages.length === 1 ? 'page' : 'pages'} to export</li>
+                <li>• {pages.length} coloring pages + title/copyright pages</li>
               </ul>
             </div>
 
@@ -208,6 +237,21 @@ const PDFExporter = ({ book, pages }: PDFExporterProps) => {
                 Add pages to your book before exporting.
               </div>
             )}
+
+            <div className="flex items-center justify-between space-x-2">
+              <Label htmlFor="single-sided" className="flex flex-col space-y-1">
+                <span>Single-sided printing</span>
+                <span className="font-normal leading-snug text-muted-foreground">
+                  Adds blank pages between coloring pages to prevent bleed-through.
+                </span>
+              </Label>
+              <Switch
+                id="single-sided"
+                checked={singleSided}
+                onCheckedChange={setSingleSided}
+                disabled={exporting}
+              />
+            </div>
 
             {exporting && (
               <div className="space-y-2">

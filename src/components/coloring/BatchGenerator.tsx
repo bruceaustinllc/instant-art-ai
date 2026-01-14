@@ -20,8 +20,7 @@ interface BatchGeneratorProps {
 }
 
 const BatchGenerator = ({ bookId: _bookId, onPageGenerated, currentPageCount: _currentPageCount }: BatchGeneratorProps) => {
-  const [prompt, setPrompt] = useState('');
-  const [pageCount, setPageCount] = useState(10);
+  const [promptsInput, setPromptsInput] = useState(''); // Changed from 'prompt' to 'promptsInput'
   const [border, setBorder] = useState<BorderTemplateId>('none');
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -31,7 +30,8 @@ const BatchGenerator = ({ bookId: _bookId, onPageGenerated, currentPageCount: _c
   const { toast } = useToast();
 
   const handleBatchGenerate = async () => {
-    if (!prompt.trim() || generating) return;
+    const individualPrompts = promptsInput.split('\n').map(p => p.trim()).filter(p => p.length > 0);
+    if (individualPrompts.length === 0 || generating) return;
 
     setGenerating(true);
     setProgress(0);
@@ -41,8 +41,9 @@ const BatchGenerator = ({ bookId: _bookId, onPageGenerated, currentPageCount: _c
 
     let successCount = 0;
     let failures = 0;
+    const totalPagesToGenerate = individualPrompts.length;
 
-    for (let i = 0; i < pageCount; i++) {
+    for (let i = 0; i < totalPagesToGenerate; i++) {
       if (abortRef.current) {
         toast({
           title: 'Generation stopped',
@@ -52,12 +53,10 @@ const BatchGenerator = ({ bookId: _bookId, onPageGenerated, currentPageCount: _c
       }
 
       setCurrentPage(i + 1);
+      const currentPrompt = individualPrompts[i];
 
       try {
-        // Add variation to each prompt
-        const variationPrompt = `${prompt.trim()} (Variation ${i + 1} of ${pageCount}, unique design)`;
-
-        const generationPrompt = `Create a black and white coloring book page illustration: ${variationPrompt}. 
+        const generationPrompt = `Create a black and white coloring book page illustration: ${currentPrompt}. 
 Style: Clean line art with clear outlines, no shading or gradients, no filled areas, 
 simple and bold lines suitable for coloring. White background.
 The image should have intricate but not overly complex details, perfect for a coloring book page.`;
@@ -71,7 +70,7 @@ The image should have intricate but not overly complex details, perfect for a co
 
         if (data.status === 'completed' && data.imageUrl) {
           const imageWithBorder = await applyBorderToImage(data.imageUrl, border);
-          await onPageGenerated(`${prompt.trim()} (${i + 1})`, imageWithBorder, 'line_art');
+          await onPageGenerated(currentPrompt, imageWithBorder, 'line_art');
           successCount++;
         } else {
           throw new Error('No image generated');
@@ -81,7 +80,6 @@ The image should have intricate but not overly complex details, perfect for a co
         failures++;
         setFailedCount(failures);
 
-        // Check for rate limit or payment errors
         const errorMsg = getInvokeErrorMessage(err);
         if (errorMsg.includes('Rate limit') || errorMsg.includes('Usage limit') || errorMsg.includes('credits')) {
           toast({
@@ -92,14 +90,12 @@ The image should have intricate but not overly complex details, perfect for a co
           break;
         }
 
-        // Add a small delay before retrying
         await new Promise((resolve) => setTimeout(resolve, 2000));
       }
 
-      setProgress(((i + 1) / pageCount) * 100);
+      setProgress(((i + 1) / totalPagesToGenerate) * 100);
 
-      // Add delay between generations to avoid rate limiting
-      if (i < pageCount - 1 && !abortRef.current) {
+      if (i < totalPagesToGenerate - 1 && !abortRef.current) {
         await new Promise((resolve) => setTimeout(resolve, 1500));
       }
     }
@@ -113,12 +109,14 @@ The image should have intricate but not overly complex details, perfect for a co
       });
     }
 
-    setPrompt('');
+    setPromptsInput('');
   };
 
   const handleStop = () => {
     abortRef.current = true;
   };
+
+  const totalPagesToGenerate = promptsInput.split('\n').map(p => p.trim()).filter(p => p.length > 0).length;
 
   return (
     <div className="glass-card rounded-xl p-6 space-y-6">
@@ -128,14 +126,14 @@ The image should have intricate but not overly complex details, perfect for a co
         </div>
         <div>
           <h3 className="font-semibold text-foreground">Batch Generate Pages</h3>
-          <p className="text-sm text-muted-foreground">Generate multiple unique variations from one prompt</p>
+          <p className="text-sm text-muted-foreground">Enter multiple prompts (one per line) to generate many pages</p>
         </div>
       </div>
 
       <Alert>
         <AlertCircle className="h-4 w-4" />
         <AlertDescription>
-          Each page will be a unique variation. Generation takes ~10 seconds per page. You can stop at any time.
+          Each line in the prompt box will generate a unique page. Generation takes ~10 seconds per page. You can stop at any time.
         </AlertDescription>
       </Alert>
 
@@ -143,38 +141,33 @@ The image should have intricate but not overly complex details, perfect for a co
         <BorderSelect value={border} onChange={setBorder} disabled={generating} />
 
         <div className="space-y-2">
-          <Label htmlFor="batch-prompt">Base Prompt</Label>
+          <Label htmlFor="batch-prompts">Prompts (one per line)</Label>
           <Textarea
-            id="batch-prompt"
-            placeholder="e.g., Generate unique full-page black-and-white line art mandalas—no text, no grayscale fill, thick clean lines suitable for adult coloring, varied complexity, calming themes like flowers, geometry, nature elements."
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            rows={4}
+            id="batch-prompts"
+            placeholder={`e.g.,
+A whimsical forest scene with friendly animals
+An intricate mandala with floral patterns
+A brave knight fighting a dragon
+A cute cat playing with yarn`}
+            value={promptsInput}
+            onChange={(e) => setPromptsInput(e.target.value)}
+            rows={8}
             disabled={generating}
             className="resize-none"
           />
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="page-count">Number of Pages</Label>
-          <Input
-            id="page-count"
-            type="number"
-            min={1}
-            max={100}
-            value={pageCount}
-            onChange={(e) => setPageCount(Math.min(100, Math.max(1, parseInt(e.target.value) || 1)))}
-            disabled={generating}
-            className="w-32"
-          />
-          <p className="text-xs text-muted-foreground">Estimated time: ~{Math.ceil((pageCount * 12) / 60)} minutes</p>
-        </div>
+        {totalPagesToGenerate > 0 && (
+          <p className="text-sm text-muted-foreground">
+            You have {totalPagesToGenerate} prompt(s) entered. Estimated time: ~{Math.ceil((totalPagesToGenerate * 12) / 60)} minutes
+          </p>
+        )}
 
         {generating && (
           <div className="space-y-3">
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">
-                Generating page {currentPage} of {pageCount}...
+                Generating page {currentPage} of {totalPagesToGenerate}...
               </span>
               <span className="font-medium">{Math.round(progress)}%</span>
             </div>
@@ -190,9 +183,9 @@ The image should have intricate but not overly complex details, perfect for a co
               Stop Generation
             </Button>
           ) : (
-            <Button onClick={handleBatchGenerate} disabled={!prompt.trim()} className="flex-1 glow-effect">
+            <Button onClick={handleBatchGenerate} disabled={totalPagesToGenerate === 0} className="flex-1 glow-effect">
               <Play className="mr-2 h-4 w-4" />
-              Generate {pageCount} Pages
+              Generate {totalPagesToGenerate} Pages
             </Button>
           )}
         </div>
