@@ -16,7 +16,7 @@ const Dashboard = () => {
     loading,
     fetchBooks,
     createBook,
-    updateBook, // New import
+    updateBook,
     selectBook,
     addPage,
     deletePage,
@@ -86,7 +86,7 @@ const Dashboard = () => {
             }
             onDeletePage={deletePage}
             onReorderPages={reorderPages}
-            onUpdateBook={updateBook} {/* New prop */}
+            onUpdateBook={updateBook}
           />
         ) : (
           <BookList

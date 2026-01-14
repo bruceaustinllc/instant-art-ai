@@ -99,7 +99,7 @@ const PDFPreview = ({ book, pages }: PDFPreviewProps) => {
 
   const createColoringPagePreview = async (page: BookPage): Promise<string> => {
     return new Promise((resolve) => {
-      const img = new Image();
+      const img = document.createElement('img'); // Changed from new Image()
       img.crossOrigin = 'anonymous';
       img.onload = () => {
         const canvas = document.createElement('canvas');
