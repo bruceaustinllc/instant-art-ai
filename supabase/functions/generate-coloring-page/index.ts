@@ -12,26 +12,24 @@ serve(async (req) => {
 
   try {
     const { prompt, action } = await req.json();
-    const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY');
+    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
     
-    if (!OPENROUTER_API_KEY) {
-      throw new Error('OPENROUTER_API_KEY is not configured. Please set it in your Supabase project secrets.');
+    if (!LOVABLE_API_KEY) {
+      throw new Error('LOVABLE_API_KEY is not configured.');
     }
 
     console.log('Request received:', { action, prompt });
 
     if (action === 'imagine') {
-      // Generate image using OpenRouter API with an image-capable model
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      // Generate image using Lovable AI Gateway with image generation model
+      const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
           'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://instantart.lovable.app',
-          'X-Title': 'Coloring Book Generator',
         },
         body: JSON.stringify({
-          model: 'google/gemini-2.5-flash-image-preview',
+          model: 'google/gemini-2.5-flash-image',
           messages: [
             {
               role: 'user',
@@ -44,8 +42,8 @@ serve(async (req) => {
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('OpenRouter API error:', response.status, errorText);
-        let message = 'Failed to generate image from OpenRouter.';
+        console.error('Lovable AI Gateway error:', response.status, errorText);
+        let message = 'Failed to generate image.';
         if (response.status === 429) {
           message = 'Rate limit exceeded. Please try again in a moment.';
           return new Response(JSON.stringify({ error: message }), {
@@ -53,13 +51,11 @@ serve(async (req) => {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         } else if (response.status === 402) {
-          message = 'Usage limit reached. Please add credits to your OpenRouter account.';
+          message = 'Usage limit reached. Please add credits to your workspace.';
           return new Response(JSON.stringify({ error: message }), {
             status: 402,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
-        } else if (response.status === 401) {
-          message = 'Invalid OpenRouter API key. Please check your OPENROUTER_API_KEY.';
         }
         return new Response(JSON.stringify({ error: message }), {
           status: response.status,
@@ -68,19 +64,19 @@ serve(async (req) => {
       }
 
       const data = await response.json();
-      console.log('OpenRouter response:', JSON.stringify(data).substring(0, 500));
+      console.log('Lovable AI response:', JSON.stringify(data).substring(0, 500));
 
-      // Extract image from OpenRouter response
+      // Extract image from Lovable AI response
       const message = data.choices?.[0]?.message;
       let imageDataUrl: string | null = null;
 
-      // Check for images array (standard OpenRouter image response)
+      // Check for images array (standard image response)
       if (message?.images && message.images.length > 0) {
-        imageDataUrl = message.images[0]?.image_url?.url || message.images[0]?.imageUrl?.url;
+        imageDataUrl = message.images[0]?.image_url?.url;
       }
       
       if (!imageDataUrl) {
-        console.error('No image data in response from OpenRouter:', JSON.stringify(data));
+        console.error('No image data in response:', JSON.stringify(data));
         throw new Error('No image was generated. Please try a different prompt.');
       }
 
