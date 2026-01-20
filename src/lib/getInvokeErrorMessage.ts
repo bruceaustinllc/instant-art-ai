@@ -25,8 +25,8 @@ export function getInvokeErrorMessage(err: unknown): string {
 
   // Friendly mapping when status bubbles up in message
   const msg = String(fallback || '');
-  if (msg.includes('401')) return 'Invalid API key. Please check your OPENROUTER_API_KEY in Supabase secrets.';
-  if (msg.includes('402')) return 'Usage limit reached. Please add credits to your OpenRouter account.';
+  if (msg.includes('401')) return 'Unauthorized. Please verify your configured provider credentials.';
+  if (msg.includes('402')) return 'Usage limit reached. Please add credits (or configure an external provider key).';
   if (msg.includes('429')) return 'Rate limit exceeded. Please try again in a moment.';
   if (msg.includes('503')) return 'Model is currently loading or busy. Please try again in a moment.';
 
