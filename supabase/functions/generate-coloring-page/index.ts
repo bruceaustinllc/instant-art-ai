@@ -12,38 +12,54 @@ serve(async (req) => {
 
   try {
     const { prompt, action } = await req.json();
-    const HF_API_TOKEN = Deno.env.get('HF_API_TOKEN'); // New environment variable
+    const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY');
     
-    if (!HF_API_TOKEN) {
-      throw new Error('HF_API_TOKEN is not configured. Please set it in your Supabase project secrets.');
+    if (!OPENROUTER_API_KEY) {
+      throw new Error('OPENROUTER_API_KEY is not configured. Please set it in your Supabase project secrets.');
     }
 
     console.log('Request received:', { action, prompt });
 
     if (action === 'imagine') {
-      // Generate image using Hugging Face Inference API with a Stable Diffusion model
-      const response = await fetch('https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0', {
+      // Generate image using OpenRouter API with an image-capable model
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${HF_API_TOKEN}`,
+          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
           'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://instantart.lovable.app',
+          'X-Title': 'Coloring Book Generator',
         },
         body: JSON.stringify({
-          inputs: prompt,
-          options: {
-            wait_for_model: true, // Wait if the model is loading
-          },
+          model: 'google/gemini-2.5-flash-image-preview',
+          messages: [
+            {
+              role: 'user',
+              content: prompt,
+            },
+          ],
+          modalities: ['image', 'text'],
         }),
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('Hugging Face API error:', response.status, errorText);
-        let message = 'Failed to generate image from Hugging Face.';
-        if (response.status === 503) {
-          message = 'Hugging Face model is currently loading or busy. Please try again in a moment.';
+        console.error('OpenRouter API error:', response.status, errorText);
+        let message = 'Failed to generate image from OpenRouter.';
+        if (response.status === 429) {
+          message = 'Rate limit exceeded. Please try again in a moment.';
+          return new Response(JSON.stringify({ error: message }), {
+            status: 429,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        } else if (response.status === 402) {
+          message = 'Usage limit reached. Please add credits to your OpenRouter account.';
+          return new Response(JSON.stringify({ error: message }), {
+            status: 402,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
         } else if (response.status === 401) {
-          message = 'Invalid Hugging Face API token. Please check your HF_API_TOKEN.';
+          message = 'Invalid OpenRouter API key. Please check your OPENROUTER_API_KEY.';
         }
         return new Response(JSON.stringify({ error: message }), {
           status: response.status,
@@ -51,17 +67,20 @@ serve(async (req) => {
         });
       }
 
-      // Hugging Face returns an image blob directly
-      const imageBlob = await response.blob();
-      const reader = new FileReader();
-      const dataUrlPromise = new Promise<string>((resolve) => {
-        reader.onloadend = () => resolve(reader.result as string);
-      });
-      reader.readAsDataURL(imageBlob);
-      const imageDataUrl = await dataUrlPromise;
+      const data = await response.json();
+      console.log('OpenRouter response:', JSON.stringify(data).substring(0, 500));
+
+      // Extract image from OpenRouter response
+      const message = data.choices?.[0]?.message;
+      let imageDataUrl: string | null = null;
+
+      // Check for images array (standard OpenRouter image response)
+      if (message?.images && message.images.length > 0) {
+        imageDataUrl = message.images[0]?.image_url?.url || message.images[0]?.imageUrl?.url;
+      }
       
       if (!imageDataUrl) {
-        console.error('No image data in response from Hugging Face.');
+        console.error('No image data in response from OpenRouter:', JSON.stringify(data));
         throw new Error('No image was generated. Please try a different prompt.');
       }
 
