@@ -4,12 +4,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { Layers, Play, Square, AlertCircle } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import BorderSelect from './BorderSelect';
 import { applyBorderToImage } from '@/lib/applyBorderToImage';
-import { getInvokeErrorMessage } from '@/lib/getInvokeErrorMessage';
+import { generateImageWithPuter } from '@/lib/puterImageGeneration';
 import type { BorderTemplateId } from '@/lib/pageBorders';
 
 interface BatchGeneratorProps {
@@ -19,7 +18,7 @@ interface BatchGeneratorProps {
 }
 
 const BatchGenerator = ({ bookId: _bookId, onPageGenerated, currentPageCount: _currentPageCount }: BatchGeneratorProps) => {
-  const [promptsInput, setPromptsInput] = useState(''); // Changed from 'prompt' to 'promptsInput'
+  const [promptsInput, setPromptsInput] = useState('');
   const [border, setBorder] = useState<BorderTemplateId>('none');
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -60,15 +59,11 @@ Style: Clean line art with clear outlines, no shading or gradients, no filled ar
 simple and bold lines suitable for coloring. White background.
 The image should have intricate but not overly complex details, perfect for a coloring book page.`;
 
-        const { data, error } = await supabase.functions.invoke('generate-coloring-page', {
-          body: { action: 'imagine', prompt: generationPrompt },
-        });
+        // Use Puter's free AI image generation
+        const result = await generateImageWithPuter(generationPrompt);
 
-        if (error) throw error;
-        if (data.error) throw new Error(data.error);
-
-        if (data.status === 'completed' && data.imageUrl) {
-          const imageWithBorder = await applyBorderToImage(data.imageUrl, border);
+        if (result.imageUrl) {
+          const imageWithBorder = await applyBorderToImage(result.imageUrl, border);
           await onPageGenerated(currentPrompt, imageWithBorder, 'line_art');
           successCount++;
         } else {
@@ -79,7 +74,7 @@ The image should have intricate but not overly complex details, perfect for a co
         failures++;
         setFailedCount(failures);
 
-        const errorMsg = getInvokeErrorMessage(err);
+        const errorMsg = err instanceof Error ? err.message : 'Unknown error';
         if (errorMsg.includes('Rate limit') || errorMsg.includes('Usage limit') || errorMsg.includes('credits')) {
           toast({
             title: 'Generation paused',

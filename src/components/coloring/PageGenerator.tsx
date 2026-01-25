@@ -4,11 +4,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Loader2, Wand2, Palette, PenTool } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import BorderSelect from './BorderSelect';
 import { applyBorderToImage } from '@/lib/applyBorderToImage';
-import { getInvokeErrorMessage } from '@/lib/getInvokeErrorMessage';
+import { generateImageWithPuter } from '@/lib/puterImageGeneration';
 import type { BorderTemplateId } from '@/lib/pageBorders';
 
 interface PageGeneratorProps {
@@ -42,15 +41,11 @@ Then convert it to a black and white coloring book style with clean outlines onl
 no shading, no filled areas, white background. Bold clear lines suitable for coloring.`;
       }
 
-      const { data, error } = await supabase.functions.invoke('generate-coloring-page', {
-        body: { action: 'imagine', prompt: generationPrompt },
-      });
+      // Use Puter's free AI image generation
+      const result = await generateImageWithPuter(generationPrompt);
 
-      if (error) throw error;
-      if (data.error) throw new Error(data.error);
-
-      if (data.status === 'completed' && data.imageUrl) {
-        const imageWithBorder = await applyBorderToImage(data.imageUrl, border);
+      if (result.imageUrl) {
+        const imageWithBorder = await applyBorderToImage(result.imageUrl, border);
         await onPageGenerated(prompt.trim(), imageWithBorder, artStyle);
         setPrompt('');
         toast({
@@ -64,7 +59,7 @@ no shading, no filled areas, white background. Bold clear lines suitable for col
       console.error('Generation error:', err);
       toast({
         title: 'Generation failed',
-        description: getInvokeErrorMessage(err),
+        description: err instanceof Error ? err.message : 'Failed to generate image',
         variant: 'destructive',
       });
     } finally {
