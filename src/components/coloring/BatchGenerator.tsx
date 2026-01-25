@@ -4,14 +4,18 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { Switch } from '@/components/ui/switch';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Layers, Play, Square, AlertCircle } from 'lucide-react';
+import { Layers, Play, Square, AlertCircle, Mail, Clock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import BorderSelect from './BorderSelect';
 import { applyBorderToImage } from '@/lib/applyBorderToImage';
 import { generateImageWithPuter, type ImageModel } from '@/lib/puterImageGeneration';
 import { addBleedMargin } from '@/lib/addBleedMargin';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/hooks/useAuth';
 import type { BorderTemplateId } from '@/lib/pageBorders';
 
 interface BatchGeneratorProps {
@@ -20,7 +24,9 @@ interface BatchGeneratorProps {
   currentPageCount: number;
 }
 
-const BatchGenerator = ({ bookId: _bookId, onPageGenerated, currentPageCount: _currentPageCount }: BatchGeneratorProps) => {
+type GenerationMode = 'realtime' | 'background';
+
+const BatchGenerator = ({ bookId, onPageGenerated, currentPageCount: _currentPageCount }: BatchGeneratorProps) => {
   const [promptsInput, setPromptsInput] = useState('');
   const [border, setBorder] = useState<BorderTemplateId>('none');
   const [model, setModel] = useState<ImageModel>('dall-e-3');
@@ -29,10 +35,68 @@ const BatchGenerator = ({ bookId: _bookId, onPageGenerated, currentPageCount: _c
   const [progress, setProgress] = useState(0);
   const [currentPage, setCurrentPage] = useState(0);
   const [failedCount, setFailedCount] = useState(0);
+  const [generationMode, setGenerationMode] = useState<GenerationMode>('realtime');
+  const [notifyEmail, setNotifyEmail] = useState('');
+  const [jobSubmitted, setJobSubmitted] = useState(false);
   const abortRef = useRef(false);
   const { toast } = useToast();
+  const { user } = useAuth();
 
-  const handleBatchGenerate = async () => {
+  // Background job submission
+  const handleBackgroundGenerate = async () => {
+    const individualPrompts = promptsInput.split('\n').map(p => p.trim()).filter(p => p.length > 0);
+    if (individualPrompts.length === 0 || !user) return;
+
+    try {
+      // Create the job in the database
+      const { data: job, error } = await supabase
+        .from('generation_jobs')
+        .insert({
+          user_id: user.id,
+          book_id: bookId,
+          prompts: individualPrompts,
+          total_count: individualPrompts.length,
+          model,
+          border,
+          add_bleed: addBleed,
+          notify_email: notifyEmail || null,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Trigger the background processor
+      const { error: invokeError } = await supabase.functions.invoke('process-generation-job', {
+        body: { jobId: job.id },
+      });
+
+      if (invokeError) {
+        console.error('Failed to invoke processor:', invokeError);
+        // Job is created, it will be picked up later or can be manually triggered
+      }
+
+      setJobSubmitted(true);
+      setPromptsInput('');
+      
+      toast({
+        title: 'Background job started!',
+        description: notifyEmail 
+          ? `We'll email you at ${notifyEmail} when complete.`
+          : 'Check back later for your generated pages.',
+      });
+    } catch (err) {
+      console.error('Failed to create job:', err);
+      toast({
+        title: 'Failed to start background job',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  // Realtime generation (existing logic)
+  const handleRealtimeGenerate = async () => {
     const individualPrompts = promptsInput.split('\n').map(p => p.trim()).filter(p => p.length > 0);
     if (individualPrompts.length === 0 || generating) return;
 
@@ -59,7 +123,6 @@ const BatchGenerator = ({ bookId: _bookId, onPageGenerated, currentPageCount: _c
       const currentPrompt = individualPrompts[i];
 
       try {
-        // Adult-focused detailed prompt
         const generationPrompt = `Create a highly detailed, intricate black and white coloring page illustration for adults of: ${currentPrompt}. 
 Style: Ultra-detailed line art with precise, clean outlines. Include intricate patterns, fine details, and realistic proportions. 
 No shading, no gradients, no filled solid areas - only outlines and patterns. Pure white background.
@@ -75,12 +138,10 @@ Ultra high resolution.`;
         if (result.imageUrl) {
           let finalImage = result.imageUrl;
           
-          // Apply border if selected
           if (border !== 'none') {
             finalImage = await applyBorderToImage(finalImage, border);
           }
           
-          // Add bleed margin if toggled on
           if (addBleed) {
             finalImage = await addBleedMargin(finalImage);
           }
@@ -111,7 +172,7 @@ Ultra high resolution.`;
       setProgress(((i + 1) / totalPagesToGenerate) * 100);
 
       if (i < totalPagesToGenerate - 1 && !abortRef.current) {
-        await new Promise((resolve) => setTimeout(resolve, 2000)); // Slightly longer delay for HD
+        await new Promise((resolve) => setTimeout(resolve, 2000));
       }
     }
 
@@ -125,6 +186,14 @@ Ultra high resolution.`;
     }
 
     setPromptsInput('');
+  };
+
+  const handleBatchGenerate = () => {
+    if (generationMode === 'background') {
+      handleBackgroundGenerate();
+    } else {
+      handleRealtimeGenerate();
+    }
   };
 
   const handleStop = () => {
@@ -145,98 +214,171 @@ Ultra high resolution.`;
         </div>
       </div>
 
-      <Alert>
-        <AlertCircle className="h-4 w-4" />
-        <AlertDescription>
-          Each line generates a unique HD page. Generation takes ~15-20 seconds per page for high quality. You can stop at any time.
-        </AlertDescription>
-      </Alert>
+      {/* Mode Selection */}
+      <Tabs value={generationMode} onValueChange={(v) => setGenerationMode(v as GenerationMode)}>
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="realtime" className="flex items-center gap-2" disabled={generating}>
+            <Play className="h-4 w-4" />
+            Realtime
+          </TabsTrigger>
+          <TabsTrigger value="background" className="flex items-center gap-2" disabled={generating}>
+            <Clock className="h-4 w-4" />
+            Background
+          </TabsTrigger>
+        </TabsList>
 
-      <div className="space-y-4">
-        {/* Model Selection */}
-        <div className="space-y-2">
-          <Label>AI Model</Label>
-          <Select value={model} onValueChange={(v) => setModel(v as ImageModel)} disabled={generating}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select model" />
-            </SelectTrigger>
-            <SelectContent className="bg-background border z-50">
-              <SelectItem value="dall-e-3">DALL-E 3 (Best Quality)</SelectItem>
-              <SelectItem value="stabilityai/stable-diffusion-3-medium">Stable Diffusion 3</SelectItem>
-              <SelectItem value="black-forest-labs/FLUX.1-schnell">Flux.1 Schnell (Fast)</SelectItem>
-              <SelectItem value="gpt-image-1">GPT Image</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        <TabsContent value="realtime" className="mt-4">
+          <Alert>
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              Keep this page open. Generation takes ~15-20 seconds per page. You can stop at any time.
+            </AlertDescription>
+          </Alert>
+        </TabsContent>
 
-        <BorderSelect value={border} onChange={setBorder} disabled={generating} />
+        <TabsContent value="background" className="mt-4 space-y-4">
+          <Alert className="border-primary/30 bg-primary/5">
+            <Mail className="h-4 w-4" />
+            <AlertDescription>
+              Close the app and we'll email you when complete. Pages generate in the background.
+            </AlertDescription>
+          </Alert>
+          
+          {jobSubmitted ? (
+            <div className="p-4 bg-primary/10 border border-primary/30 rounded-lg text-center">
+              <p className="text-primary font-medium">✅ Job submitted!</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                {notifyEmail ? `We'll email ${notifyEmail} when complete.` : 'Check back later for your pages.'}
+              </p>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="mt-3"
+                onClick={() => setJobSubmitted(false)}
+              >
+                Submit another batch
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Label htmlFor="notify-email">Notification Email (optional)</Label>
+              <Input
+                id="notify-email"
+                type="email"
+                placeholder="you@example.com"
+                value={notifyEmail}
+                onChange={(e) => setNotifyEmail(e.target.value)}
+                disabled={generating}
+              />
+              <p className="text-xs text-muted-foreground">
+                Leave blank to skip email notification
+              </p>
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
 
-        {/* Bleed Toggle */}
-        <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-          <div className="space-y-0.5">
-            <Label htmlFor="batch-bleed-toggle" className="cursor-pointer">Add Bleed Margin</Label>
-            <p className="text-xs text-muted-foreground">
-              White border for KDP print bleed (0.125")
-            </p>
+      {!jobSubmitted && (
+        <div className="space-y-4">
+          {/* Model Selection */}
+          <div className="space-y-2">
+            <Label>AI Model</Label>
+            <Select value={model} onValueChange={(v) => setModel(v as ImageModel)} disabled={generating}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select model" />
+              </SelectTrigger>
+              <SelectContent className="bg-background border z-50">
+                <SelectItem value="dall-e-3">DALL-E 3 (Best Quality)</SelectItem>
+                <SelectItem value="stabilityai/stable-diffusion-3-medium">Stable Diffusion 3</SelectItem>
+                <SelectItem value="black-forest-labs/FLUX.1-schnell">Flux.1 Schnell (Fast)</SelectItem>
+                <SelectItem value="gpt-image-1">GPT Image</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-          <Switch
-            id="batch-bleed-toggle"
-            checked={addBleed}
-            onCheckedChange={setAddBleed}
-            disabled={generating}
-          />
-        </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="batch-prompts">Prompts (one per line)</Label>
-          <Textarea
-            id="batch-prompts"
-            placeholder={`e.g.,
+          <BorderSelect value={border} onChange={setBorder} disabled={generating} />
+
+          {/* Bleed Toggle */}
+          <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+            <div className="space-y-0.5">
+              <Label htmlFor="batch-bleed-toggle" className="cursor-pointer">Add Bleed Margin</Label>
+              <p className="text-xs text-muted-foreground">
+                White border for KDP print bleed (0.125")
+              </p>
+            </div>
+            <Switch
+              id="batch-bleed-toggle"
+              checked={addBleed}
+              onCheckedChange={setAddBleed}
+              disabled={generating}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="batch-prompts">Prompts (one per line)</Label>
+            <Textarea
+              id="batch-prompts"
+              placeholder={`e.g.,
 A majestic lion with intricate mane patterns in African savanna
 A detailed steampunk owl with mechanical gears and feathers
 An ornate Victorian mansion with elaborate architectural details
 A realistic wolf surrounded by forest flora with detailed textures`}
-            value={promptsInput}
-            onChange={(e) => setPromptsInput(e.target.value)}
-            rows={8}
-            disabled={generating}
-            className="resize-none"
-          />
-        </div>
-
-        {totalPagesToGenerate > 0 && (
-          <p className="text-sm text-muted-foreground">
-            You have {totalPagesToGenerate} prompt(s) entered. Estimated time: ~{Math.ceil((totalPagesToGenerate * 20) / 60)} minutes
-          </p>
-        )}
-
-        {generating && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">
-                Generating page {currentPage} of {totalPagesToGenerate}...
-              </span>
-              <span className="font-medium">{Math.round(progress)}%</span>
-            </div>
-            <Progress value={progress} className="h-2" />
-            {failedCount > 0 && <p className="text-xs text-destructive">{failedCount} page(s) failed to generate</p>}
+              value={promptsInput}
+              onChange={(e) => setPromptsInput(e.target.value)}
+              rows={8}
+              disabled={generating}
+              className="resize-none"
+            />
           </div>
-        )}
 
-        <div className="flex gap-3">
-          {generating ? (
-            <Button onClick={handleStop} variant="destructive" className="flex-1">
-              <Square className="mr-2 h-4 w-4" />
-              Stop Generation
-            </Button>
-          ) : (
-            <Button onClick={handleBatchGenerate} disabled={totalPagesToGenerate === 0} className="flex-1 glow-effect">
-              <Play className="mr-2 h-4 w-4" />
-              Generate {totalPagesToGenerate} Pages
-            </Button>
+          {totalPagesToGenerate > 0 && (
+            <p className="text-sm text-muted-foreground">
+              You have {totalPagesToGenerate} prompt(s) entered. 
+              {generationMode === 'realtime' && ` Estimated time: ~${Math.ceil((totalPagesToGenerate * 20) / 60)} minutes`}
+            </p>
           )}
+
+          {generating && generationMode === 'realtime' && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">
+                  Generating page {currentPage} of {totalPagesToGenerate}...
+                </span>
+                <span className="font-medium">{Math.round(progress)}%</span>
+              </div>
+              <Progress value={progress} className="h-2" />
+              {failedCount > 0 && <p className="text-xs text-destructive">{failedCount} page(s) failed to generate</p>}
+            </div>
+          )}
+
+          <div className="flex gap-3">
+            {generating ? (
+              <Button onClick={handleStop} variant="destructive" className="flex-1">
+                <Square className="mr-2 h-4 w-4" />
+                Stop Generation
+              </Button>
+            ) : (
+              <Button 
+                onClick={handleBatchGenerate} 
+                disabled={totalPagesToGenerate === 0 || (generationMode === 'background' && !user)} 
+                className="flex-1 glow-effect"
+              >
+                {generationMode === 'background' ? (
+                  <>
+                    <Clock className="mr-2 h-4 w-4" />
+                    Queue {totalPagesToGenerate} Pages
+                  </>
+                ) : (
+                  <>
+                    <Play className="mr-2 h-4 w-4" />
+                    Generate {totalPagesToGenerate} Pages
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

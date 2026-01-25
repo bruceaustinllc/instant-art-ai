@@ -88,6 +88,71 @@ export type Database = {
         }
         Relationships: []
       }
+      generation_jobs: {
+        Row: {
+          add_bleed: boolean
+          book_id: string
+          border: string
+          completed_at: string | null
+          completed_count: number
+          created_at: string
+          error_message: string | null
+          failed_count: number
+          id: string
+          model: string
+          notify_email: string | null
+          prompts: Json
+          status: string
+          total_count: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          add_bleed?: boolean
+          book_id: string
+          border?: string
+          completed_at?: string | null
+          completed_count?: number
+          created_at?: string
+          error_message?: string | null
+          failed_count?: number
+          id?: string
+          model?: string
+          notify_email?: string | null
+          prompts: Json
+          status?: string
+          total_count?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          add_bleed?: boolean
+          book_id?: string
+          border?: string
+          completed_at?: string | null
+          completed_count?: number
+          created_at?: string
+          error_message?: string | null
+          failed_count?: number
+          id?: string
+          model?: string
+          notify_email?: string | null
+          prompts?: Json
+          status?: string
+          total_count?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "generation_jobs_book_id_fkey"
+            columns: ["book_id"]
+            isOneToOne: false
+            referencedRelation: "coloring_books"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           created_at: string
