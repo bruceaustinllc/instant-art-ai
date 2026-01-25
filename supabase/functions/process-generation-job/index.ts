@@ -16,7 +16,7 @@ serve(async (req) => {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
   try {
-    const { jobId } = await req.json();
+    const { jobId, promptIndex = 0 } = await req.json();
 
     if (!jobId) {
       return new Response(JSON.stringify({ error: "Missing jobId" }), {
@@ -40,22 +40,47 @@ serve(async (req) => {
       });
     }
 
-    if (job.status !== "pending") {
-      return new Response(JSON.stringify({ message: "Job already processed" }), {
+    // Skip if already completed or failed
+    if (job.status === "completed" || job.status === "failed") {
+      return new Response(JSON.stringify({ message: "Job already finished" }), {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Mark as processing
-    await supabase
-      .from("generation_jobs")
-      .update({ status: "processing" })
-      .eq("id", jobId);
-
     const prompts = job.prompts as string[];
-    let completedCount = 0;
-    let failedCount = 0;
+    
+    // If this is the first call, mark as processing
+    if (promptIndex === 0 && job.status === "pending") {
+      await supabase
+        .from("generation_jobs")
+        .update({ status: "processing" })
+        .eq("id", jobId);
+    }
+
+    // Check if we've processed all prompts
+    if (promptIndex >= prompts.length) {
+      // All done - mark completed
+      await supabase
+        .from("generation_jobs")
+        .update({
+          status: "completed",
+          completed_at: new Date().toISOString(),
+        })
+        .eq("id", jobId);
+
+      return new Response(JSON.stringify({ 
+        success: true, 
+        message: "All prompts processed",
+        completedCount: job.completed_count,
+        failedCount: job.failed_count,
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const prompt = prompts[promptIndex];
+    console.log(`Processing prompt ${promptIndex + 1}/${prompts.length}: ${prompt.substring(0, 50)}...`);
 
     // Get current max page number for this book
     const { data: existingPages } = await supabase
@@ -65,7 +90,7 @@ serve(async (req) => {
       .order("page_number", { ascending: false })
       .limit(1);
 
-    let currentPageNumber = existingPages?.[0]?.page_number || 0;
+    const currentPageNumber = (existingPages?.[0]?.page_number || 0) + 1;
 
     // Check for Cloudflare credentials first, then fallback to Lovable AI
     const CLOUDFLARE_ACCOUNT_ID = Deno.env.get("CLOUDFLARE_ACCOUNT_ID");
@@ -78,105 +103,97 @@ serve(async (req) => {
       throw new Error("No image generation API configured");
     }
 
-    console.log(`Using ${useCloudflare ? "Cloudflare Workers AI" : "Lovable AI Gateway"} for generation`);
+    let imageUrl: string | null = null;
+    let failed = false;
 
-    for (let i = 0; i < prompts.length; i++) {
-      const prompt = prompts[i];
+    try {
+      if (useCloudflare) {
+        imageUrl = await generateWithCloudflare(
+          CLOUDFLARE_ACCOUNT_ID,
+          CLOUDFLARE_API_TOKEN,
+          prompt
+        );
+      } else {
+        imageUrl = await generateWithLovableAI(LOVABLE_API_KEY!, prompt);
+      }
+    } catch (err) {
+      console.error(`Generation error for prompt ${promptIndex}:`, err);
+      failed = true;
+    }
 
-      try {
-        let imageUrl: string | null = null;
+    // Update counts
+    const newCompletedCount = failed ? job.completed_count : job.completed_count + 1;
+    const newFailedCount = failed ? job.failed_count + 1 : job.failed_count;
 
-        if (useCloudflare) {
-          // Use Cloudflare Workers AI
-          imageUrl = await generateWithCloudflare(
-            CLOUDFLARE_ACCOUNT_ID,
-            CLOUDFLARE_API_TOKEN,
-            prompt
-          );
-        } else {
-          // Fallback to Lovable AI Gateway
-          imageUrl = await generateWithLovableAI(LOVABLE_API_KEY!, prompt);
-        }
+    // Save the page if successful
+    if (imageUrl && !failed) {
+      const { error: insertError } = await supabase.from("book_pages").insert({
+        book_id: job.book_id,
+        user_id: job.user_id,
+        page_number: currentPageNumber,
+        prompt: prompt,
+        image_url: imageUrl,
+        art_style: "line_art",
+      });
 
-        if (!imageUrl) {
-          console.error(`No image generated for prompt ${i}`);
-          failedCount++;
-          continue;
-        }
-
-        // Save the page
-        currentPageNumber++;
-        const { error: insertError } = await supabase.from("book_pages").insert({
-          book_id: job.book_id,
-          user_id: job.user_id,
-          page_number: currentPageNumber,
-          prompt: prompt,
-          image_url: imageUrl,
-          art_style: "line_art",
-        });
-
-        if (insertError) {
-          console.error("Page insert error:", insertError);
-          failedCount++;
-        } else {
-          completedCount++;
-        }
-
-        // Update progress
-        await supabase
-          .from("generation_jobs")
-          .update({
-            completed_count: completedCount,
-            failed_count: failedCount,
-          })
-          .eq("id", jobId);
-
-        // Delay between generations (Cloudflare has better rate limits)
-        if (i < prompts.length - 1) {
-          const delay = useCloudflare ? 1000 : 2000;
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
-      } catch (err) {
-        console.error(`Error processing prompt ${i}:`, err);
-        failedCount++;
-
-        // Check for rate limit errors
-        const errMsg = err instanceof Error ? err.message : String(err);
-        if (errMsg.includes("rate limit") || errMsg.includes("429") || errMsg.includes("402")) {
-          await supabase
-            .from("generation_jobs")
-            .update({
-              status: "failed",
-              completed_count: completedCount,
-              failed_count: failedCount,
-              error_message: "Rate limit exceeded. Please try again later.",
-            })
-            .eq("id", jobId);
-
-          return new Response(JSON.stringify({ error: "Rate limit exceeded" }), {
-            status: 429,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
+      if (insertError) {
+        console.error("Page insert error:", insertError);
       }
     }
 
-    // Mark as completed
+    // Update job progress
     await supabase
       .from("generation_jobs")
       .update({
-        status: "completed",
-        completed_count: completedCount,
-        failed_count: failedCount,
-        completed_at: new Date().toISOString(),
+        completed_count: newCompletedCount,
+        failed_count: newFailedCount,
       })
       .eq("id", jobId);
+
+    // Schedule next prompt processing using EdgeRuntime.waitUntil
+    const nextPromptIndex = promptIndex + 1;
+    
+    if (nextPromptIndex < prompts.length) {
+      // Use waitUntil to process next prompt in background after returning
+      const functionUrl = `${supabaseUrl}/functions/v1/process-generation-job`;
+      
+      // @ts-ignore - EdgeRuntime is available in Supabase Edge Functions
+      EdgeRuntime.waitUntil(
+        (async () => {
+          // Small delay to avoid overwhelming the system
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          
+          try {
+            await fetch(functionUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${supabaseServiceKey}`,
+              },
+              body: JSON.stringify({ jobId, promptIndex: nextPromptIndex }),
+            });
+          } catch (err) {
+            console.error("Failed to trigger next prompt:", err);
+          }
+        })()
+      );
+    } else {
+      // Last prompt - mark as completed
+      await supabase
+        .from("generation_jobs")
+        .update({
+          status: "completed",
+          completed_at: new Date().toISOString(),
+        })
+        .eq("id", jobId);
+    }
 
     return new Response(
       JSON.stringify({
         success: true,
-        completedCount,
-        failedCount,
+        promptIndex,
+        nextPromptIndex: nextPromptIndex < prompts.length ? nextPromptIndex : null,
+        imageGenerated: !failed,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -202,7 +219,7 @@ async function generateWithCloudflare(
   apiToken: string,
   prompt: string
 ): Promise<string | null> {
-  const coloringPrompt = `black and white coloring page, clean line art, detailed illustration for adults: ${prompt}. Style: intricate patterns, precise outlines, no shading, no gradients, pure white background, zen-tangle inspired details.`;
+  const coloringPrompt = `black and white coloring page, clean line art, detailed illustration for adults: ${prompt}. Style: intricate patterns, precise outlines, no shading, no gradients, pure white background.`;
 
   const response = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/stabilityai/stable-diffusion-xl-base-1.0`,
@@ -214,7 +231,7 @@ async function generateWithCloudflare(
       },
       body: JSON.stringify({
         prompt: coloringPrompt,
-        negative_prompt: "color, colorful, shading, gradients, shadows, gray, grey, filled areas, realistic photo",
+        negative_prompt: "color, colorful, shading, gradients, shadows, gray, filled areas",
         num_steps: 20,
         guidance: 7.5,
       }),
@@ -224,10 +241,6 @@ async function generateWithCloudflare(
   if (!response.ok) {
     const errorText = await response.text();
     console.error("Cloudflare AI error:", response.status, errorText);
-    
-    if (response.status === 429) {
-      throw new Error("rate limit exceeded");
-    }
     throw new Error(`Cloudflare AI error: ${response.status}`);
   }
 
@@ -247,12 +260,7 @@ async function generateWithLovableAI(
   apiKey: string,
   prompt: string
 ): Promise<string | null> {
-  const generationPrompt = `Create a highly detailed, intricate black and white coloring page illustration for adults of: ${prompt}. 
-Style: Ultra-detailed line art with precise, clean outlines. Include intricate patterns, fine details, and realistic proportions. 
-No shading, no gradients, no filled solid areas - only outlines and patterns. Pure white background.
-The design should fill the ENTIRE image edge-to-edge with no borders or margins.
-Art style: Professional adult coloring book quality with zen-tangle inspired details and sophisticated artistic complexity.
-Ultra high resolution.`;
+  const generationPrompt = `Create a black and white coloring page illustration for adults of: ${prompt}. Style: detailed line art with clean outlines. No shading, no gradients. Pure white background.`;
 
   const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
@@ -270,10 +278,6 @@ Ultra high resolution.`;
   if (!resp.ok) {
     const errorText = await resp.text();
     console.error("Lovable AI error:", resp.status, errorText);
-    
-    if (resp.status === 429 || resp.status === 402) {
-      throw new Error("rate limit exceeded");
-    }
     throw new Error(`Lovable AI error: ${resp.status}`);
   }
 
