@@ -24,10 +24,40 @@ export async function generateImageWithPuter(prompt: string): Promise<PuterGener
     throw new Error('Puter.js is not loaded. Please refresh the page.');
   }
 
+  // Puter is sometimes sensitive to very long / heavily formatted prompts.
+  // Keep it as a single line and within a reasonable length.
+  const safePrompt = String(prompt ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 900);
+
+  if (!safePrompt) {
+    throw new Error('Please enter a prompt first.');
+  }
+
   try {
-    // Use default model (gpt-image-1-mini) which is free
-    // The txt2img function returns an HTMLImageElement
-    const imgElement = await window.puter.ai.txt2img(prompt);
+    // Explicitly request the free default model. In practice this avoids
+    // intermittent Puter-side “undefined” payload errors.
+    const result = await window.puter.ai.txt2img(safePrompt, {
+      model: 'gpt-image-1-mini',
+    });
+
+    // Puter sometimes throws/rejects with a plain object like:
+    // { success: false, error: "..." }
+    // But in some cases it may *resolve* to a non-image value too.
+    const anyResult: any = result as any;
+    if (anyResult && typeof anyResult === 'object' && anyResult.success === false) {
+      const msg =
+        typeof anyResult.error === 'string'
+          ? anyResult.error
+          : anyResult.error?.message
+            ? String(anyResult.error.message)
+            : 'Puter failed to generate an image.';
+      throw new Error(msg);
+    }
+
+    // Normal successful path: HTMLImageElement
+    const imgElement = result as unknown as HTMLImageElement;
 
     // Wait for the image to be fully loaded
     await new Promise<void>((resolve, reject) => {
@@ -51,13 +81,24 @@ export async function generateImageWithPuter(prompt: string): Promise<PuterGener
     return { imageUrl };
   } catch (error) {
     console.error('Puter image generation error:', error);
-    if (error instanceof Error) {
-      // Check for specific Puter errors
-      if (error.message.includes('not logged in') || error.message.includes('authentication')) {
-        throw new Error('Please log in to Puter to generate images (click the Puter popup that appears)');
-      }
-      throw error;
+
+    // If Puter gives us a plain object, surface its message.
+    const anyErr: any = error as any;
+    if (anyErr && typeof anyErr === 'object' && typeof anyErr.error === 'string') {
+      throw new Error(anyErr.error);
     }
+
+    if (error instanceof Error) {
+      const msg = error.message || 'Failed to generate image with Puter.';
+      if (msg.toLowerCase().includes('not logged in') || msg.toLowerCase().includes('authentication')) {
+        throw new Error('Please log in to Puter to generate images (a Puter popup may appear).');
+      }
+      if (msg.toLowerCase().includes('first argument must be of type string')) {
+        throw new Error('Puter did not return a usable image. Please try again (or shorten your prompt).');
+      }
+      throw new Error(msg);
+    }
+
     throw new Error('Failed to generate image with Puter. Please try again.');
   }
 }
