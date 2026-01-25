@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Book, Layers, Wand2, Settings, Upload } from 'lucide-react';
+import { ArrowLeft, Book, Layers, Wand2, Settings, Upload, ImageIcon } from 'lucide-react';
 import { ColoringBook, BookPage } from '@/hooks/useColoringBooks';
 import PageGenerator from './PageGenerator';
 import BatchGenerator from './BatchGenerator';
+import ImageUploadConverter from './ImageUploadConverter';
 import PageGallery from './PageGallery';
 import PDFExporter from './PDFExporter';
 import BookSettingsDialog from './BookSettingsDialog';
@@ -31,11 +32,6 @@ const BookEditor = ({
 }: BookEditorProps) => {
   const [generatorTab, setGeneratorTab] = useState('single');
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
-
-  const handleImportPages = () => {
-    // Placeholder for future import functionality
-    alert('Import Pages functionality coming soon!');
-  };
 
   return (
     <div className="space-y-8">
@@ -74,14 +70,21 @@ const BookEditor = ({
 
       {/* Page Generators with Tabs */}
       <Tabs value={generatorTab} onValueChange={setGeneratorTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-2 max-w-md">
+        <TabsList className="grid w-full grid-cols-3 max-w-lg">
           <TabsTrigger value="single" className="flex items-center gap-2">
             <Wand2 className="h-4 w-4" />
-            Single Page
+            <span className="hidden sm:inline">AI Generate</span>
+            <span className="sm:hidden">AI</span>
           </TabsTrigger>
           <TabsTrigger value="batch" className="flex items-center gap-2">
             <Layers className="h-4 w-4" />
-            Batch Generate
+            <span className="hidden sm:inline">Batch</span>
+            <span className="sm:hidden">Batch</span>
+          </TabsTrigger>
+          <TabsTrigger value="upload" className="flex items-center gap-2">
+            <ImageIcon className="h-4 w-4" />
+            <span className="hidden sm:inline">Upload</span>
+            <span className="sm:hidden">Upload</span>
           </TabsTrigger>
         </TabsList>
 
@@ -103,17 +106,22 @@ const BookEditor = ({
             }
           />
         </TabsContent>
+
+        <TabsContent value="upload" className="mt-4">
+          <ImageUploadConverter
+            bookId={book.id}
+            onPageGenerated={(prompt, imageUrl, artStyle) => 
+              onAddPage(prompt, imageUrl, artStyle)
+            }
+          />
+        </TabsContent>
       </Tabs>
 
-      {/* Page Gallery and Import */}
+      {/* Page Gallery */}
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold text-foreground">
           Book Pages ({pages.length})
         </h3>
-        <Button variant="outline" size="sm" onClick={handleImportPages}>
-          <Upload className="h-4 w-4 mr-2" />
-          Import Pages
-        </Button>
       </div>
       <PageGallery
         pages={pages}
