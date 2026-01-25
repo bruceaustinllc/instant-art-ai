@@ -88,9 +88,9 @@ const JobsList = () => {
       case 'pending':
         return <Badge variant="secondary" className="gap-1"><Clock className="h-3 w-3" /> Pending</Badge>;
       case 'processing':
-        return <Badge className="gap-1 bg-blue-500"><Loader2 className="h-3 w-3 animate-spin" /> Processing</Badge>;
+        return <Badge className="gap-1 bg-primary"><Loader2 className="h-3 w-3 animate-spin" /> Processing</Badge>;
       case 'completed':
-        return <Badge className="gap-1 bg-green-500"><CheckCircle className="h-3 w-3" /> Completed</Badge>;
+        return <Badge className="gap-1 bg-primary/80"><CheckCircle className="h-3 w-3" /> Completed</Badge>;
       case 'failed':
         return <Badge variant="destructive" className="gap-1"><XCircle className="h-3 w-3" /> Failed</Badge>;
       default:
