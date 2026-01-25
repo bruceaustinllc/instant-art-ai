@@ -11,18 +11,37 @@ declare global {
   }
 }
 
+export type ImageModel = 
+  | 'dall-e-3'
+  | 'stabilityai/stable-diffusion-3-medium'
+  | 'black-forest-labs/FLUX.1-schnell'
+  | 'gpt-image-1'
+  | 'gpt-image-1-mini';
+
+export interface PuterGenerationOptions {
+  model?: ImageModel;
+  quality?: 'low' | 'medium' | 'high' | 'hd';
+}
+
 export interface PuterGenerationResult {
   imageUrl: string;
 }
 
 /**
  * Generate an image using Puter's free AI image generation
- * Uses gpt-image-1-mini (default) for free generation
+ * Uses DALL-E 3 for high quality adult coloring pages by default
  */
-export async function generateImageWithPuter(prompt: string): Promise<PuterGenerationResult> {
+export async function generateImageWithPuter(
+  prompt: string, 
+  options: PuterGenerationOptions = {}
+): Promise<PuterGenerationResult> {
   if (!window.puter?.ai?.txt2img) {
     throw new Error('Puter.js is not loaded. Please refresh the page.');
   }
+
+  // Use DALL-E 3 with HD quality for detailed adult coloring pages
+  const model = options.model || 'dall-e-3';
+  const quality = options.quality || 'hd';
 
   // Puter is sometimes sensitive to very long / heavily formatted prompts.
   // Keep it as a single line and within a reasonable length.
@@ -36,15 +55,13 @@ export async function generateImageWithPuter(prompt: string): Promise<PuterGener
   }
 
   try {
-    // Explicitly request the free default model. In practice this avoids
-    // intermittent Puter-side “undefined” payload errors.
     const result = await window.puter.ai.txt2img(safePrompt, {
-      model: 'gpt-image-1-mini',
+      model,
+      quality,
     });
 
     // Puter sometimes throws/rejects with a plain object like:
     // { success: false, error: "..." }
-    // But in some cases it may *resolve* to a non-image value too.
     const anyResult: any = result as any;
     if (anyResult && typeof anyResult === 'object' && anyResult.success === false) {
       const msg =
@@ -66,8 +83,8 @@ export async function generateImageWithPuter(prompt: string): Promise<PuterGener
       } else {
         imgElement.onload = () => resolve();
         imgElement.onerror = () => reject(new Error('Failed to load generated image'));
-        // Timeout after 30 seconds
-        setTimeout(() => reject(new Error('Image generation timed out')), 30000);
+        // Timeout after 60 seconds for HD images
+        setTimeout(() => reject(new Error('Image generation timed out')), 60000);
       }
     });
 
