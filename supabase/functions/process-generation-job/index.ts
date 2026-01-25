@@ -67,71 +67,39 @@ serve(async (req) => {
 
     let currentPageNumber = existingPages?.[0]?.page_number || 0;
 
+    // Check for Cloudflare credentials first, then fallback to Lovable AI
+    const CLOUDFLARE_ACCOUNT_ID = Deno.env.get("CLOUDFLARE_ACCOUNT_ID");
+    const CLOUDFLARE_API_TOKEN = Deno.env.get("CLOUDFLARE_API_TOKEN");
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      throw new Error("LOVABLE_API_KEY is not configured");
+
+    const useCloudflare = CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN;
+    
+    if (!useCloudflare && !LOVABLE_API_KEY) {
+      throw new Error("No image generation API configured");
     }
+
+    console.log(`Using ${useCloudflare ? "Cloudflare Workers AI" : "Lovable AI Gateway"} for generation`);
 
     for (let i = 0; i < prompts.length; i++) {
       const prompt = prompts[i];
 
       try {
-        const generationPrompt = `Create a highly detailed, intricate black and white coloring page illustration for adults of: ${prompt}. 
-Style: Ultra-detailed line art with precise, clean outlines. Include intricate patterns, fine details, and realistic proportions. 
-No shading, no gradients, no filled solid areas - only outlines and patterns. Pure white background.
-The design should fill the ENTIRE image edge-to-edge with no borders or margins.
-Art style: Professional adult coloring book quality with zen-tangle inspired details and sophisticated artistic complexity.
-Ultra high resolution.`;
+        let imageUrl: string | null = null;
 
-        const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${LOVABLE_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: "google/gemini-2.5-flash-image",
-            messages: [{ role: "user", content: generationPrompt }],
-            modalities: ["image", "text"],
-          }),
-        });
-
-        if (!resp.ok) {
-          const errorText = await resp.text();
-          console.error(`Generation failed for prompt ${i}:`, resp.status, errorText);
-          failedCount++;
-
-          if (resp.status === 429 || resp.status === 402) {
-            // Rate limit or usage limit - stop processing
-            await supabase
-              .from("generation_jobs")
-              .update({
-                status: "failed",
-                completed_count: completedCount,
-                failed_count: failedCount,
-                error_message: resp.status === 402 ? "Usage limit reached" : "Rate limit exceeded",
-              })
-              .eq("id", jobId);
-
-            // Send failure email
-            await sendNotificationEmail(job.notify_email, job.book_id, completedCount, failedCount, true);
-
-            return new Response(JSON.stringify({ error: "Rate or usage limit" }), {
-              status: resp.status,
-              headers: { ...corsHeaders, "Content-Type": "application/json" },
-            });
-          }
-
-          // Wait before retry
-          await new Promise((resolve) => setTimeout(resolve, 3000));
-          continue;
+        if (useCloudflare) {
+          // Use Cloudflare Workers AI
+          imageUrl = await generateWithCloudflare(
+            CLOUDFLARE_ACCOUNT_ID,
+            CLOUDFLARE_API_TOKEN,
+            prompt
+          );
+        } else {
+          // Fallback to Lovable AI Gateway
+          imageUrl = await generateWithLovableAI(LOVABLE_API_KEY!, prompt);
         }
 
-        const data = await resp.json();
-        const imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-
         if (!imageUrl) {
-          console.error(`No image in response for prompt ${i}`);
+          console.error(`No image generated for prompt ${i}`);
           failedCount++;
           continue;
         }
@@ -163,13 +131,33 @@ Ultra high resolution.`;
           })
           .eq("id", jobId);
 
-        // Delay between generations
+        // Delay between generations (Cloudflare has better rate limits)
         if (i < prompts.length - 1) {
-          await new Promise((resolve) => setTimeout(resolve, 2000));
+          const delay = useCloudflare ? 1000 : 2000;
+          await new Promise((resolve) => setTimeout(resolve, delay));
         }
       } catch (err) {
         console.error(`Error processing prompt ${i}:`, err);
         failedCount++;
+
+        // Check for rate limit errors
+        const errMsg = err instanceof Error ? err.message : String(err);
+        if (errMsg.includes("rate limit") || errMsg.includes("429") || errMsg.includes("402")) {
+          await supabase
+            .from("generation_jobs")
+            .update({
+              status: "failed",
+              completed_count: completedCount,
+              failed_count: failedCount,
+              error_message: "Rate limit exceeded. Please try again later.",
+            })
+            .eq("id", jobId);
+
+          return new Response(JSON.stringify({ error: "Rate limit exceeded" }), {
+            status: 429,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
       }
     }
 
@@ -183,9 +171,6 @@ Ultra high resolution.`;
         completed_at: new Date().toISOString(),
       })
       .eq("id", jobId);
-
-    // Send notification email
-    await sendNotificationEmail(job.notify_email, job.book_id, completedCount, failedCount, false);
 
     return new Response(
       JSON.stringify({
@@ -209,63 +194,89 @@ Ultra high resolution.`;
   }
 });
 
-async function sendNotificationEmail(
-  email: string | null,
-  bookId: string,
-  completedCount: number,
-  failedCount: number,
-  isFailed: boolean
-) {
-  if (!email) return;
+/**
+ * Generate image using Cloudflare Workers AI
+ */
+async function generateWithCloudflare(
+  accountId: string,
+  apiToken: string,
+  prompt: string
+): Promise<string | null> {
+  const coloringPrompt = `black and white coloring page, clean line art, detailed illustration for adults: ${prompt}. Style: intricate patterns, precise outlines, no shading, no gradients, pure white background, zen-tangle inspired details.`;
 
-  const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-  if (!RESEND_API_KEY) {
-    console.error("RESEND_API_KEY not configured");
-    return;
-  }
-
-  try {
-    const subject = isFailed
-      ? `⚠️ Batch generation stopped - ${completedCount} pages completed`
-      : `✅ Batch generation complete - ${completedCount} pages ready!`;
-
-    const html = isFailed
-      ? `
-        <h1>Batch Generation Stopped</h1>
-        <p>Your batch generation was interrupted due to rate limits or usage limits.</p>
-        <p><strong>Completed:</strong> ${completedCount} pages</p>
-        <p><strong>Failed:</strong> ${failedCount} pages</p>
-        <p>Please check your account credits and try again later for the remaining pages.</p>
-      `
-      : `
-        <h1>🎨 Your Coloring Pages Are Ready!</h1>
-        <p>Great news! Your batch generation has completed successfully.</p>
-        <p><strong>Generated:</strong> ${completedCount} pages</p>
-        ${failedCount > 0 ? `<p><strong>Failed:</strong> ${failedCount} pages</p>` : ""}
-        <p>Open the app to view and download your coloring book!</p>
-      `;
-
-    const response = await fetch("https://api.resend.com/emails", {
+  const response = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/stabilityai/stable-diffusion-xl-base-1.0`,
+    {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
+        Authorization: `Bearer ${apiToken}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: "Coloring Book Creator <onboarding@resend.dev>",
-        to: [email],
-        subject,
-        html,
+        prompt: coloringPrompt,
+        negative_prompt: "color, colorful, shading, gradients, shadows, gray, grey, filled areas, realistic photo",
+        num_steps: 20,
+        guidance: 7.5,
       }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Email send failed:", errorText);
-    } else {
-      console.log("Notification email sent to:", email);
     }
-  } catch (err) {
-    console.error("Email send error:", err);
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Cloudflare AI error:", response.status, errorText);
+    
+    if (response.status === 429) {
+      throw new Error("rate limit exceeded");
+    }
+    throw new Error(`Cloudflare AI error: ${response.status}`);
   }
+
+  // Cloudflare returns raw image bytes
+  const imageBuffer = await response.arrayBuffer();
+  const base64 = btoa(
+    new Uint8Array(imageBuffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
+  );
+  
+  return `data:image/png;base64,${base64}`;
+}
+
+/**
+ * Generate image using Lovable AI Gateway (fallback)
+ */
+async function generateWithLovableAI(
+  apiKey: string,
+  prompt: string
+): Promise<string | null> {
+  const generationPrompt = `Create a highly detailed, intricate black and white coloring page illustration for adults of: ${prompt}. 
+Style: Ultra-detailed line art with precise, clean outlines. Include intricate patterns, fine details, and realistic proportions. 
+No shading, no gradients, no filled solid areas - only outlines and patterns. Pure white background.
+The design should fill the ENTIRE image edge-to-edge with no borders or margins.
+Art style: Professional adult coloring book quality with zen-tangle inspired details and sophisticated artistic complexity.
+Ultra high resolution.`;
+
+  const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "google/gemini-2.5-flash-image",
+      messages: [{ role: "user", content: generationPrompt }],
+      modalities: ["image", "text"],
+    }),
+  });
+
+  if (!resp.ok) {
+    const errorText = await resp.text();
+    console.error("Lovable AI error:", resp.status, errorText);
+    
+    if (resp.status === 429 || resp.status === 402) {
+      throw new Error("rate limit exceeded");
+    }
+    throw new Error(`Lovable AI error: ${resp.status}`);
+  }
+
+  const data = await resp.json();
+  return data.choices?.[0]?.message?.images?.[0]?.image_url?.url || null;
 }
