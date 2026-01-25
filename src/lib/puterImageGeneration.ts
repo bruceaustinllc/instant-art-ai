@@ -5,7 +5,7 @@ declare global {
   interface Window {
     puter: {
       ai: {
-        txt2img: (prompt: string, options?: { model?: string }) => Promise<HTMLImageElement>;
+        txt2img: (prompt: string, options?: Record<string, unknown>) => Promise<HTMLImageElement>;
       };
     };
   }
@@ -17,7 +17,7 @@ export interface PuterGenerationResult {
 
 /**
  * Generate an image using Puter's free AI image generation
- * Uses the FLUX.1-schnell model for fast, free generation
+ * Uses gpt-image-1-mini (default) for free generation
  */
 export async function generateImageWithPuter(prompt: string): Promise<PuterGenerationResult> {
   if (!window.puter?.ai?.txt2img) {
@@ -25,30 +25,39 @@ export async function generateImageWithPuter(prompt: string): Promise<PuterGener
   }
 
   try {
-    // Use FLUX.1-schnell for free, fast generation
-    const imgElement = await window.puter.ai.txt2img(prompt, {
-      model: 'black-forest-labs/FLUX.1-schnell',
+    // Use default model (gpt-image-1-mini) which is free
+    // The txt2img function returns an HTMLImageElement
+    const imgElement = await window.puter.ai.txt2img(prompt);
+
+    // Wait for the image to be fully loaded
+    await new Promise<void>((resolve, reject) => {
+      if (imgElement.complete && imgElement.naturalWidth > 0) {
+        resolve();
+      } else {
+        imgElement.onload = () => resolve();
+        imgElement.onerror = () => reject(new Error('Failed to load generated image'));
+        // Timeout after 30 seconds
+        setTimeout(() => reject(new Error('Image generation timed out')), 30000);
+      }
     });
 
-    // Convert the image element to a data URL
-    const canvas = document.createElement('canvas');
-    canvas.width = imgElement.naturalWidth || imgElement.width || 1024;
-    canvas.height = imgElement.naturalHeight || imgElement.height || 1024;
-    
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      throw new Error('Failed to create canvas context');
+    // The imgElement.src already contains a data URL
+    const imageUrl = imgElement.src;
+
+    if (!imageUrl || !imageUrl.startsWith('data:')) {
+      throw new Error('No valid image data received from Puter');
     }
-    
-    ctx.drawImage(imgElement, 0, 0);
-    const imageUrl = canvas.toDataURL('image/png');
 
     return { imageUrl };
   } catch (error) {
     console.error('Puter image generation error:', error);
     if (error instanceof Error) {
+      // Check for specific Puter errors
+      if (error.message.includes('not logged in') || error.message.includes('authentication')) {
+        throw new Error('Please log in to Puter to generate images (click the Puter popup that appears)');
+      }
       throw error;
     }
-    throw new Error('Failed to generate image with Puter');
+    throw new Error('Failed to generate image with Puter. Please try again.');
   }
 }
