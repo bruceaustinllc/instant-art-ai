@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { LogOut, BookOpen, Palette } from 'lucide-react';
+import { LogOut, BookOpen, Palette, Clock } from 'lucide-react';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useAuth } from '@/hooks/useAuth';
 import { useColoringBooks } from '@/hooks/useColoringBooks';
 import BookList from './BookList';
 import BookEditor from './BookEditor';
 import CreateBookDialog from './CreateBookDialog';
+import JobsList from './JobsList';
 
 const Dashboard = () => {
   const { user, signOut } = useAuth();
@@ -27,6 +29,7 @@ const Dashboard = () => {
   } = useColoringBooks();
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<'books' | 'jobs'>('books');
 
   useEffect(() => {
     fetchBooks();
@@ -89,13 +92,32 @@ const Dashboard = () => {
             onUpdateBook={updateBook}
           />
         ) : (
-          <BookList
-            books={books}
-            onSelectBook={selectBook}
-            onCreateBook={() => setCreateDialogOpen(true)}
-            onDeleteBook={deleteBook}
-            loading={loading}
-          />
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'books' | 'jobs')}>
+            <TabsList className="mb-6">
+              <TabsTrigger value="books" className="gap-2">
+                <BookOpen className="h-4 w-4" />
+                My Books
+              </TabsTrigger>
+              <TabsTrigger value="jobs" className="gap-2">
+                <Clock className="h-4 w-4" />
+                Jobs
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="books">
+              <BookList
+                books={books}
+                onSelectBook={selectBook}
+                onCreateBook={() => setCreateDialogOpen(true)}
+                onDeleteBook={deleteBook}
+                loading={loading}
+              />
+            </TabsContent>
+
+            <TabsContent value="jobs">
+              <JobsList />
+            </TabsContent>
+          </Tabs>
         )}
       </main>
 
