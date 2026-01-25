@@ -3,12 +3,15 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
+import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Layers, Play, Square, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import BorderSelect from './BorderSelect';
 import { applyBorderToImage } from '@/lib/applyBorderToImage';
-import { generateImageWithPuter } from '@/lib/puterImageGeneration';
+import { generateImageWithPuter, type ImageModel } from '@/lib/puterImageGeneration';
+import { addBleedMargin } from '@/lib/addBleedMargin';
 import type { BorderTemplateId } from '@/lib/pageBorders';
 
 interface BatchGeneratorProps {
@@ -20,6 +23,8 @@ interface BatchGeneratorProps {
 const BatchGenerator = ({ bookId: _bookId, onPageGenerated, currentPageCount: _currentPageCount }: BatchGeneratorProps) => {
   const [promptsInput, setPromptsInput] = useState('');
   const [border, setBorder] = useState<BorderTemplateId>('none');
+  const [model, setModel] = useState<ImageModel>('dall-e-3');
+  const [addBleed, setAddBleed] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [currentPage, setCurrentPage] = useState(0);
@@ -54,17 +59,33 @@ const BatchGenerator = ({ bookId: _bookId, onPageGenerated, currentPageCount: _c
       const currentPrompt = individualPrompts[i];
 
       try {
-        const generationPrompt = `Create a black and white coloring book page illustration: ${currentPrompt}. 
-Style: Clean line art with clear outlines, no shading or gradients, no filled areas, 
-simple and bold lines suitable for coloring. White background.
-The image should have intricate but not overly complex details, perfect for a coloring book page.`;
+        // Adult-focused detailed prompt
+        const generationPrompt = `Create a highly detailed, intricate black and white coloring page illustration for adults of: ${currentPrompt}. 
+Style: Ultra-detailed line art with precise, clean outlines. Include intricate patterns, fine details, and realistic proportions. 
+No shading, no gradients, no filled solid areas - only outlines and patterns. Pure white background.
+The design should fill the ENTIRE image edge-to-edge with no borders or margins.
+Art style: Professional adult coloring book quality with zen-tangle inspired details and sophisticated artistic complexity.
+Ultra high resolution.`;
 
-        // Use Puter's free AI image generation
-        const result = await generateImageWithPuter(generationPrompt);
+        const result = await generateImageWithPuter(generationPrompt, {
+          model,
+          quality: 'hd',
+        });
 
         if (result.imageUrl) {
-          const imageWithBorder = await applyBorderToImage(result.imageUrl, border);
-          await onPageGenerated(currentPrompt, imageWithBorder, 'line_art');
+          let finalImage = result.imageUrl;
+          
+          // Apply border if selected
+          if (border !== 'none') {
+            finalImage = await applyBorderToImage(finalImage, border);
+          }
+          
+          // Add bleed margin if toggled on
+          if (addBleed) {
+            finalImage = await addBleedMargin(finalImage);
+          }
+          
+          await onPageGenerated(currentPrompt, finalImage, 'line_art');
           successCount++;
         } else {
           throw new Error('No image generated');
@@ -90,7 +111,7 @@ The image should have intricate but not overly complex details, perfect for a co
       setProgress(((i + 1) / totalPagesToGenerate) * 100);
 
       if (i < totalPagesToGenerate - 1 && !abortRef.current) {
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await new Promise((resolve) => setTimeout(resolve, 2000)); // Slightly longer delay for HD
       }
     }
 
@@ -120,29 +141,61 @@ The image should have intricate but not overly complex details, perfect for a co
         </div>
         <div>
           <h3 className="font-semibold text-foreground">Batch Generate Pages</h3>
-          <p className="text-sm text-muted-foreground">Enter multiple prompts (one per line) to generate many pages</p>
+          <p className="text-sm text-muted-foreground">Generate multiple detailed adult coloring pages</p>
         </div>
       </div>
 
       <Alert>
         <AlertCircle className="h-4 w-4" />
         <AlertDescription>
-          Each line in the prompt box will generate a unique page. Generation takes ~10 seconds per page. You can stop at any time.
+          Each line generates a unique HD page. Generation takes ~15-20 seconds per page for high quality. You can stop at any time.
         </AlertDescription>
       </Alert>
 
       <div className="space-y-4">
+        {/* Model Selection */}
+        <div className="space-y-2">
+          <Label>AI Model</Label>
+          <Select value={model} onValueChange={(v) => setModel(v as ImageModel)} disabled={generating}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select model" />
+            </SelectTrigger>
+            <SelectContent className="bg-background border z-50">
+              <SelectItem value="dall-e-3">DALL-E 3 (Best Quality)</SelectItem>
+              <SelectItem value="stabilityai/stable-diffusion-3-medium">Stable Diffusion 3</SelectItem>
+              <SelectItem value="black-forest-labs/FLUX.1-schnell">Flux.1 Schnell (Fast)</SelectItem>
+              <SelectItem value="gpt-image-1">GPT Image</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
         <BorderSelect value={border} onChange={setBorder} disabled={generating} />
+
+        {/* Bleed Toggle */}
+        <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+          <div className="space-y-0.5">
+            <Label htmlFor="batch-bleed-toggle" className="cursor-pointer">Add Bleed Margin</Label>
+            <p className="text-xs text-muted-foreground">
+              White border for KDP print bleed (0.125")
+            </p>
+          </div>
+          <Switch
+            id="batch-bleed-toggle"
+            checked={addBleed}
+            onCheckedChange={setAddBleed}
+            disabled={generating}
+          />
+        </div>
 
         <div className="space-y-2">
           <Label htmlFor="batch-prompts">Prompts (one per line)</Label>
           <Textarea
             id="batch-prompts"
             placeholder={`e.g.,
-A whimsical forest scene with friendly animals
-An intricate mandala with floral patterns
-A brave knight fighting a dragon
-A cute cat playing with yarn`}
+A majestic lion with intricate mane patterns in African savanna
+A detailed steampunk owl with mechanical gears and feathers
+An ornate Victorian mansion with elaborate architectural details
+A realistic wolf surrounded by forest flora with detailed textures`}
             value={promptsInput}
             onChange={(e) => setPromptsInput(e.target.value)}
             rows={8}
@@ -153,7 +206,7 @@ A cute cat playing with yarn`}
 
         {totalPagesToGenerate > 0 && (
           <p className="text-sm text-muted-foreground">
-            You have {totalPagesToGenerate} prompt(s) entered. Estimated time: ~{Math.ceil((totalPagesToGenerate * 12) / 60)} minutes
+            You have {totalPagesToGenerate} prompt(s) entered. Estimated time: ~{Math.ceil((totalPagesToGenerate * 20) / 60)} minutes
           </p>
         )}
 
