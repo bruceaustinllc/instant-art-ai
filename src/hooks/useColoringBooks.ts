@@ -34,7 +34,22 @@ export const useColoringBooks = () => {
   const [currentBook, setCurrentBook] = useState<ColoringBook | null>(null);
   const [pages, setPages] = useState<BookPage[]>([]);
   const [loading, setLoading] = useState(false);
+  const [pagesHasMore, setPagesHasMore] = useState(false);
+  const [pagesLoadingMore, setPagesLoadingMore] = useState(false);
   const activePagesFetchRef = useRef(0);
+  const pagesPagingRef = useRef<{
+    bookId: string | null;
+    total: number;
+    nextOffset: number;
+    batchSize: number;
+    fetchToken: number;
+  }>({
+    bookId: null,
+    total: 0,
+    nextOffset: 0,
+    batchSize: 4,
+    fetchToken: 0,
+  });
 
   const fetchBooks = useCallback(async () => {
     if (!user) return;
@@ -61,8 +76,10 @@ export const useColoringBooks = () => {
 
     // Reset immediately so UI doesn't look stuck on stale state
     setPages([]);
+    setPagesHasMore(false);
+    setPagesLoadingMore(true);
 
-    const PAGE_BATCH_SIZE = 12;
+    const PAGE_BATCH_SIZE = pagesPagingRef.current.batchSize;
 
     try {
       // Get row count without fetching heavy columns
@@ -76,39 +93,86 @@ export const useColoringBooks = () => {
       const total = count ?? 0;
       if (total === 0) {
         setPages([]);
+        setPagesHasMore(false);
         return;
       }
 
-      let offset = 0;
-      while (offset < total) {
-        if (activePagesFetchRef.current !== fetchToken) return; // superseded
+      // Store paging state for subsequent “Load more” actions
+      pagesPagingRef.current = {
+        bookId,
+        total,
+        nextOffset: 0,
+        batchSize: PAGE_BATCH_SIZE,
+        fetchToken,
+      };
 
-        const { data, error } = await supabase
-          .from('book_pages')
-          .select('id, book_id, user_id, prompt, image_url, page_number, art_style, created_at')
-          .eq('book_id', bookId)
-          .order('page_number', { ascending: true })
-          .range(offset, offset + PAGE_BATCH_SIZE - 1);
+      // Fetch ONLY the first batch. More pages are fetched on-demand.
+      const { data, error } = await supabase
+        .from('book_pages')
+        .select('id, book_id, user_id, prompt, image_url, page_number, art_style, created_at')
+        .eq('book_id', bookId)
+        .order('page_number', { ascending: true })
+        .range(0, PAGE_BATCH_SIZE - 1);
 
-        if (error) throw error;
+      if (error) throw error;
 
-        const batch = (data || []) as BookPage[];
-        if (batch.length === 0) break;
+      const firstBatch = (data || []) as BookPage[];
+      setPages(firstBatch);
 
-        setPages((prev) => {
-          // guard against duplicates if backend returns overlapping ranges
-          const seen = new Set(prev.map((p) => p.id));
-          const merged = [...prev, ...batch.filter((p) => !seen.has(p.id))];
-          merged.sort((a, b) => a.page_number - b.page_number);
-          return merged;
-        });
-
-        offset += PAGE_BATCH_SIZE;
-      }
+      const nextOffset = firstBatch.length;
+      pagesPagingRef.current.nextOffset = nextOffset;
+      setPagesHasMore(nextOffset < total);
     } catch (err) {
       console.error('Error fetching pages:', err);
+      setPagesHasMore(false);
+    } finally {
+      setPagesLoadingMore(false);
     }
   }, []);
+
+  const fetchMorePages = useCallback(async (bookId: string) => {
+    const paging = pagesPagingRef.current;
+    if (paging.bookId !== bookId) return;
+    if (!pagesHasMore) return;
+    if (pagesLoadingMore) return;
+    if (activePagesFetchRef.current !== paging.fetchToken) return; // superseded
+
+    const { nextOffset, batchSize, total } = paging;
+    setPagesLoadingMore(true);
+
+    try {
+      const { data, error } = await supabase
+        .from('book_pages')
+        .select('id, book_id, user_id, prompt, image_url, page_number, art_style, created_at')
+        .eq('book_id', bookId)
+        .order('page_number', { ascending: true })
+        .range(nextOffset, nextOffset + batchSize - 1);
+
+      if (error) throw error;
+
+      const batch = (data || []) as BookPage[];
+      if (batch.length === 0) {
+        setPagesHasMore(false);
+        return;
+      }
+
+      setPages((prev) => {
+        const seen = new Set(prev.map((p) => p.id));
+        const merged = [...prev, ...batch.filter((p) => !seen.has(p.id))];
+        merged.sort((a, b) => a.page_number - b.page_number);
+        return merged;
+      });
+
+      const newOffset = nextOffset + batch.length;
+      pagesPagingRef.current.nextOffset = newOffset;
+      setPagesHasMore(newOffset < total);
+    } catch (err) {
+      console.error('Error fetching more pages:', err);
+    }
+    finally {
+      setPagesLoadingMore(false);
+    }
+  }, [pagesHasMore, pagesLoadingMore]);
 
   const createBook = useCallback(async (title: string, description?: string) => {
     if (!user) return null;
@@ -265,10 +329,13 @@ export const useColoringBooks = () => {
     currentBook,
     pages,
     loading,
+    pagesHasMore,
+    pagesLoadingMore,
     fetchBooks,
     createBook,
     updateBook,
     selectBook,
+    fetchMorePages,
     addPage,
     deletePage,
     deleteBook,

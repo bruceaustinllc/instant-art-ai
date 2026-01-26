@@ -1,5 +1,4 @@
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import { Trash2, GripVertical, FileImage } from 'lucide-react';
 import { BookPage } from '@/hooks/useColoringBooks';
 import {
@@ -24,9 +23,17 @@ interface PageGalleryProps {
   pages: BookPage[];
   onDeletePage: (pageId: string) => void;
   onReorderPages: (pages: BookPage[]) => void;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
 }
 
 interface SortablePageProps {
+  page: BookPage;
+  onDelete: (pageId: string) => void;
+}
+
+interface PageCardProps {
   page: BookPage;
   onDelete: (pageId: string) => void;
 }
@@ -49,15 +56,17 @@ const SortablePage = ({ page, onDelete }: SortablePageProps) => {
   };
 
   return (
-    <Card
+    <div
       ref={setNodeRef}
       style={style}
-      className={`glass-card overflow-hidden group relative ${isDragging ? 'shadow-2xl ring-2 ring-primary' : ''}`}
+      className={`rounded-lg border bg-card text-card-foreground shadow-sm glass-card overflow-hidden group relative ${isDragging ? 'shadow-2xl ring-2 ring-primary' : ''}`}
     >
-      <div className="aspect-[8.5/11] relative bg-white">
+      <div className="aspect-[8.5/11] relative bg-background">
         <img
           src={page.image_url}
           alt={page.prompt}
+          loading="lazy"
+          decoding="async"
           className="w-full h-full object-contain"
         />
         
@@ -92,11 +101,48 @@ const SortablePage = ({ page, onDelete }: SortablePageProps) => {
           {page.prompt}
         </p>
       </div>
-    </Card>
+    </div>
   );
 };
 
-const PageGallery = ({ pages, onDeletePage, onReorderPages }: PageGalleryProps) => {
+const PageCard = ({ page, onDelete }: PageCardProps) => {
+  return (
+    <div className="rounded-lg border bg-card text-card-foreground shadow-sm glass-card overflow-hidden group relative">
+      <div className="aspect-[8.5/11] relative bg-background">
+        <img
+          src={page.image_url}
+          alt={page.prompt}
+          loading="lazy"
+          decoding="async"
+          className="w-full h-full object-contain"
+        />
+
+        <div className="absolute top-2 left-2 bg-background/80 backdrop-blur-sm px-2 py-1 rounded text-xs font-medium">
+          Page {page.page_number}
+        </div>
+
+        <div className="absolute inset-0 bg-background/80 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 pointer-events-none group-hover:pointer-events-auto">
+          <Button
+            variant="destructive"
+            size="icon"
+            onClick={() => onDelete(page.id)}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+
+      <div className="p-3">
+        <p className="text-xs text-muted-foreground truncate" title={page.prompt}>
+          {page.prompt}
+        </p>
+      </div>
+    </div>
+  );
+};
+
+const PageGallery = ({ pages, onDeletePage, onReorderPages, hasMore, loadingMore, onLoadMore }: PageGalleryProps) => {
+  const canReorder = !hasMore;
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -145,27 +191,53 @@ const PageGallery = ({ pages, onDeletePage, onReorderPages }: PageGalleryProps) 
           Book Pages ({pages.length})
         </h3>
         <p className="text-sm text-muted-foreground">
-          Drag pages to reorder
+          {canReorder ? 'Drag pages to reorder' : 'Load all pages to reorder'}
         </p>
       </div>
 
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragEnd={handleDragEnd}
-      >
-        <SortableContext items={pages.map(p => p.id)} strategy={rectSortingStrategy}>
+      <div className="space-y-6">
+        {canReorder ? (
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext items={pages.map((p) => p.id)} strategy={rectSortingStrategy}>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                {pages.map((page) => (
+                  <SortablePage
+                    key={page.id}
+                    page={page}
+                    onDelete={onDeletePage}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
+        ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             {pages.map((page) => (
-              <SortablePage
+              <PageCard
                 key={page.id}
                 page={page}
                 onDelete={onDeletePage}
               />
             ))}
           </div>
-        </SortableContext>
-      </DndContext>
+        )}
+
+        {hasMore && onLoadMore && (
+          <div className="flex justify-center">
+            <Button
+              variant="outline"
+              onClick={onLoadMore}
+              disabled={!!loadingMore}
+            >
+              {loadingMore ? 'Loading…' : 'Load more pages'}
+            </Button>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

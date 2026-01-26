@@ -16,10 +16,13 @@ const Dashboard = () => {
     currentBook,
     pages,
     loading,
+    pagesHasMore,
+    pagesLoadingMore,
     fetchBooks,
     createBook,
     updateBook,
     selectBook,
+    fetchMorePages,
     addPage,
     deletePage,
     deleteBook,
@@ -90,6 +93,9 @@ const Dashboard = () => {
             onDeletePage={deletePage}
             onReorderPages={reorderPages}
             onUpdateBook={updateBook}
+            hasMorePages={pagesHasMore}
+            loadingMorePages={pagesLoadingMore}
+            onLoadMorePages={() => fetchMorePages(currentBook.id)}
           />
         ) : (
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'books' | 'jobs')}>
