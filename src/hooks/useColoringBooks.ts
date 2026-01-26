@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './useAuth';
 import type { TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
@@ -34,6 +34,7 @@ export const useColoringBooks = () => {
   const [currentBook, setCurrentBook] = useState<ColoringBook | null>(null);
   const [pages, setPages] = useState<BookPage[]>([]);
   const [loading, setLoading] = useState(false);
+  const activePagesFetchRef = useRef(0);
 
   const fetchBooks = useCallback(async () => {
     if (!user) return;
@@ -54,15 +55,56 @@ export const useColoringBooks = () => {
   }, [user]);
 
   const fetchPages = useCallback(async (bookId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('book_pages')
-        .select('*')
-        .eq('book_id', bookId)
-        .order('page_number', { ascending: true });
+    // NOTE: Some books can have very large image_url payloads.
+    // Fetching everything at once can cause backend timeouts.
+    const fetchToken = ++activePagesFetchRef.current;
 
-      if (error) throw error;
-      setPages(data || []);
+    // Reset immediately so UI doesn't look stuck on stale state
+    setPages([]);
+
+    const PAGE_BATCH_SIZE = 12;
+
+    try {
+      // Get row count without fetching heavy columns
+      const { count, error: countError } = await supabase
+        .from('book_pages')
+        .select('id', { count: 'exact', head: true })
+        .eq('book_id', bookId);
+
+      if (countError) throw countError;
+
+      const total = count ?? 0;
+      if (total === 0) {
+        setPages([]);
+        return;
+      }
+
+      let offset = 0;
+      while (offset < total) {
+        if (activePagesFetchRef.current !== fetchToken) return; // superseded
+
+        const { data, error } = await supabase
+          .from('book_pages')
+          .select('id, book_id, user_id, prompt, image_url, page_number, art_style, created_at')
+          .eq('book_id', bookId)
+          .order('page_number', { ascending: true })
+          .range(offset, offset + PAGE_BATCH_SIZE - 1);
+
+        if (error) throw error;
+
+        const batch = (data || []) as BookPage[];
+        if (batch.length === 0) break;
+
+        setPages((prev) => {
+          // guard against duplicates if backend returns overlapping ranges
+          const seen = new Set(prev.map((p) => p.id));
+          const merged = [...prev, ...batch.filter((p) => !seen.has(p.id))];
+          merged.sort((a, b) => a.page_number - b.page_number);
+          return merged;
+        });
+
+        offset += PAGE_BATCH_SIZE;
+      }
     } catch (err) {
       console.error('Error fetching pages:', err);
     }
