@@ -19,6 +19,9 @@ interface BookEditorProps {
   onDeletePage: (pageId: string) => void;
   onReorderPages: (pages: BookPage[]) => void;
   onUpdateBook: (bookId: string, updates: Partial<ColoringBook>) => Promise<any>;
+  hasMorePages: boolean;
+  loadingMorePages: boolean;
+  onLoadMorePages: () => void;
 }
 
 const BookEditor = ({
@@ -29,6 +32,9 @@ const BookEditor = ({
   onDeletePage,
   onReorderPages,
   onUpdateBook,
+  hasMorePages,
+  loadingMorePages,
+  onLoadMorePages,
 }: BookEditorProps) => {
   const [generatorTab, setGeneratorTab] = useState('single');
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
@@ -127,6 +133,9 @@ const BookEditor = ({
         pages={pages}
         onDeletePage={onDeletePage}
         onReorderPages={onReorderPages}
+        hasMore={hasMorePages}
+        loadingMore={loadingMorePages}
+        onLoadMore={onLoadMorePages}
       />
 
       {/* PDF Preview */}
