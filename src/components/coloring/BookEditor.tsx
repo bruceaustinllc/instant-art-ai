@@ -9,6 +9,7 @@ import PageGallery from './PageGallery';
 import PDFExporter from './PDFExporter';
 import BookSettingsDialog from './BookSettingsDialog';
 import PDFPreview from './PDFPreview';
+import ExportAllButton from './ExportAllButton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface BookEditorProps {
@@ -70,6 +71,7 @@ const BookEditor = ({
             <span className="sr-only">Book Settings</span>
           </Button>
           
+          <ExportAllButton bookId={book.id} bookTitle={book.title} />
           <PDFExporter book={book} pages={pages} />
         </div>
       </div>
