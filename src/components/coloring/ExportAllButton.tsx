@@ -69,9 +69,10 @@ const ExportAllButton = ({ bookId, bookTitle }: ExportAllButtonProps) => {
         if (error) throw error;
 
         for (const page of data || []) {
-          // Generate a safe filename
-          const safeTitle = bookTitle.replace(/[^a-z0-9]/gi, '_').substring(0, 30);
-          const filename = `${safeTitle}_page_${String(page.page_number).padStart(3, '0')}.png`;
+          // Generate a unique filename using download count + short ID
+          const safeTitle = bookTitle.replace(/[^a-z0-9]/gi, '_').substring(0, 20);
+          const shortId = page.id.split('-')[0]; // First segment of UUID
+          const filename = `${safeTitle}_${String(downloaded + 1).padStart(4, '0')}_${shortId}.png`;
           
           downloadImage(page.image_url, filename);
           downloaded++;
