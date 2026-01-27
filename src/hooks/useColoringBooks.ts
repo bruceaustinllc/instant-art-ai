@@ -7,10 +7,7 @@ export interface ColoringBook {
   id: string;
   user_id: string;
   title: string;
-  subtitle: string | null; // New field for series subtitle
   description: string | null;
-  author_name: string | null; // New field for author name
-  copyright_text: string | null; // New field for copyright information
   page_size: string;
   status: string;
   created_at: string;
@@ -184,10 +181,7 @@ export const useColoringBooks = () => {
           title,
           description,
           page_size: '8.5x11',
-          subtitle: null, // Default new fields
-          author_name: user.email || null, // Default author to user email
-          copyright_text: `© ${new Date().getFullYear()} ${user.email || 'Your Name'}`, // Default copyright
-        } as TablesInsert<'coloring_books'>) // Corrected type assertion
+        })
         .select()
         .single();
 
