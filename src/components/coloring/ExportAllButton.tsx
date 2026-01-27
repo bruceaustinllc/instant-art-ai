@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Download, Loader2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
+import JSZip from 'jszip';
 
 interface ExportAllButtonProps {
   bookId: string;
@@ -12,17 +13,6 @@ interface ExportAllButtonProps {
 const ExportAllButton = ({ bookId, bookTitle }: ExportAllButtonProps) => {
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
-
-  const downloadImage = (dataUrl: string, filename: string) => {
-    const link = document.createElement('a');
-    link.href = dataUrl;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
   const handleExportAll = async () => {
     setExporting(true);
@@ -50,18 +40,25 @@ const ExportAllButton = ({ bookId, bookTitle }: ExportAllButtonProps) => {
       setProgress({ current: 0, total });
 
       toast({
-        title: 'Starting export',
-        description: `Downloading ${total} images. They will save to your downloads folder.`,
+        title: 'Preparing ZIP file',
+        description: `Processing ${total} images. This may take a moment...`,
       });
 
-      // Fetch and download in small batches to avoid memory issues
-      const BATCH_SIZE = 2;
-      let downloaded = 0;
+      // Create a ZIP file with folder named after book
+      const zip = new JSZip();
+      const safeTitle = bookTitle.replace(/[^a-z0-9]/gi, '_').substring(0, 30);
+      const folder = zip.folder(safeTitle);
+
+      if (!folder) throw new Error('Failed to create folder in ZIP');
+
+      // Fetch all pages in batches
+      const BATCH_SIZE = 10;
+      let processed = 0;
 
       for (let offset = 0; offset < total; offset += BATCH_SIZE) {
         const { data, error } = await supabase
           .from('book_pages')
-          .select('id, page_number, image_url, prompt')
+          .select('id, page_number, image_url')
           .eq('book_id', bookId)
           .order('page_number', { ascending: true })
           .range(offset, offset + BATCH_SIZE - 1);
@@ -69,23 +66,38 @@ const ExportAllButton = ({ bookId, bookTitle }: ExportAllButtonProps) => {
         if (error) throw error;
 
         for (const page of data || []) {
-          // Generate a unique filename using download count + short ID
-          const safeTitle = bookTitle.replace(/[^a-z0-9]/gi, '_').substring(0, 20);
-          const shortId = page.id.split('-')[0]; // First segment of UUID
-          const filename = `${safeTitle}_${String(downloaded + 1).padStart(4, '0')}_${shortId}.png`;
-          
-          downloadImage(page.image_url, filename);
-          downloaded++;
-          setProgress({ current: downloaded, total });
-
-          // Small delay between downloads to avoid browser blocking
-          await delay(300);
+          // Extract base64 data and add to ZIP
+          const base64Match = page.image_url.match(/^data:image\/(\w+);base64,(.+)$/);
+          if (base64Match) {
+            const [, , base64Data] = base64Match;
+            const shortId = page.id.split('-')[0];
+            const filename = `${String(processed + 1).padStart(4, '0')}_${shortId}.png`;
+            folder.file(filename, base64Data, { base64: true });
+          }
+          processed++;
+          setProgress({ current: processed, total });
         }
       }
 
+      // Generate and download the ZIP
+      toast({
+        title: 'Creating ZIP file',
+        description: 'Compressing images...',
+      });
+
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${safeTitle}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
       toast({
         title: 'Export complete!',
-        description: `Successfully downloaded ${downloaded} images.`,
+        description: `Downloaded ${processed} images in "${safeTitle}.zip"`,
       });
     } catch (error) {
       console.error('Export error:', error);
@@ -110,12 +122,12 @@ const ExportAllButton = ({ bookId, bookTitle }: ExportAllButtonProps) => {
       {exporting ? (
         <>
           <Loader2 className="h-4 w-4 animate-spin" />
-          Exporting {progress.current}/{progress.total}
+          {progress.total > 0 ? `${progress.current}/${progress.total}` : 'Preparing...'}
         </>
       ) : (
         <>
           <Download className="h-4 w-4" />
-          Export All Images
+          Export All
         </>
       )}
     </Button>
