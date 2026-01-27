@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Wand2, Palette, PenTool } from 'lucide-react';
+import { Loader2, Wand2, Palette, PenTool, Sun, Brush } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import BorderSelect from './BorderSelect';
 import { applyBorderToImage } from '@/lib/applyBorderToImage';
@@ -18,41 +18,84 @@ interface PageGeneratorProps {
   onPageGenerated: (prompt: string, imageUrl: string, artStyle: string) => Promise<any>;
 }
 
+type ArtStyle = 'simple' | 'detailed' | 'realistic_shading' | 'bold_shapes';
+
+const artStyleInfo: Record<ArtStyle, { label: string; icon: React.ReactNode; description: string }> = {
+  simple: {
+    label: 'Simple & Relaxing',
+    icon: <Sun className="h-4 w-4" />,
+    description: 'Clean, minimal lines for a calming experience',
+  },
+  detailed: {
+    label: 'Detailed Line Art',
+    icon: <PenTool className="h-4 w-4" />,
+    description: 'Intricate patterns for experienced colorists',
+  },
+  realistic_shading: {
+    label: 'Learn to Shade',
+    icon: <Brush className="h-4 w-4" />,
+    description: 'Grayscale zones to practice realistic shading',
+  },
+  bold_shapes: {
+    label: 'Bold Shapes',
+    icon: <Palette className="h-4 w-4" />,
+    description: 'Large, defined areas with clear boundaries',
+  },
+};
+
 const PageGenerator = ({ bookId: _bookId, onPageGenerated }: PageGeneratorProps) => {
   const [prompt, setPrompt] = useState('');
-  const [artStyle, setArtStyle] = useState<'line_art' | 'convert'>('line_art');
+  const [artStyle, setArtStyle] = useState<ArtStyle>('simple');
   const [border, setBorder] = useState<BorderTemplateId>('none');
   const [model, setModel] = useState<ImageModel>('dall-e-3');
   const [addBleed, setAddBleed] = useState(false);
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
+  const buildPrompt = (basePrompt: string, style: ArtStyle): string => {
+    const prompts: Record<ArtStyle, string> = {
+      simple: `Create a simple, relaxing black and white coloring page of: ${basePrompt}. 
+Style: Clean, minimal outlines with LARGE open spaces to color. Use thick, smooth lines. 
+Avoid fine details, thin lines, or crowded patterns. Keep it calming and easy to color.
+No shading, no gradients - only simple outlines. Pure white background.
+The design should be beginner-friendly and stress-relieving.
+Ultra high resolution.`,
+
+      detailed: `Create a detailed black and white coloring page illustration for adults of: ${basePrompt}. 
+Style: Intricate line art with precise, clean outlines. Include patterns and fine details. 
+No shading, no gradients, no filled solid areas - only outlines and patterns. Pure white background.
+The design should fill the entire image edge-to-edge with no borders.
+Professional adult coloring book quality with sophisticated artistic complexity.
+Ultra high resolution.`,
+
+      realistic_shading: `Create a realistic grayscale reference illustration of: ${basePrompt} designed to teach shading techniques.
+Style: Divide the image into clearly numbered or labeled ZONES showing different gray tones (light, medium, dark).
+Include a small legend showing the grayscale values for each zone.
+The zones should have clear outlines so users can practice matching the shading.
+Think of it as a "paint by numbers" but for learning realistic shading and tonal values.
+Show how light hits the subject with distinct shadow zones and highlight areas.
+Educational style that teaches value and form. Pure white background.
+Ultra high resolution.`,
+
+      bold_shapes: `Create a bold, graphic black and white coloring page of: ${basePrompt}.
+Style: Large, clearly defined shapes with THICK black outlines. 
+Use geometric simplification - break the subject into big, easy-to-color sections.
+No thin lines, no intricate details. Think poster-style or stained-glass effect.
+Each section should be large enough for markers or even paint.
+Relaxing and satisfying to color. Pure white background.
+Ultra high resolution.`,
+    };
+
+    return prompts[style];
+  };
+
   const handleGenerate = async () => {
     if (!prompt.trim() || loading) return;
 
     setLoading(true);
     try {
-      // Build adult-focused, detailed coloring page prompt
-      let generationPrompt = prompt.trim();
+      const generationPrompt = buildPrompt(prompt.trim(), artStyle);
 
-      if (artStyle === 'line_art') {
-        generationPrompt = `Create a highly detailed, intricate black and white coloring page illustration for adults of: ${prompt}. 
-Style: Ultra-detailed line art with precise, clean outlines. Include intricate patterns, fine details, and realistic proportions. 
-No shading, no gradients, no filled solid areas - only outlines and patterns. Pure white background.
-The design should fill the ENTIRE image edge-to-edge with no borders or margins.
-Art style: Professional adult coloring book quality with zen-tangle inspired details, mandala patterns where appropriate, and sophisticated artistic complexity.
-Ultra high resolution.`;
-      } else {
-        generationPrompt = `Create a photorealistic, highly detailed illustration of: ${prompt}. 
-Then render it as a sophisticated black and white coloring page for adults.
-Include intricate details, realistic proportions, and fine linework.
-Style: Clean precise outlines only, no shading or solid fills. Pure white background.
-The design should fill the ENTIRE image edge-to-edge.
-Adult coloring book quality with complex patterns and details.
-Ultra high resolution.`;
-      }
-
-      // Use selected model with HD quality
       const result = await generateImageWithPuter(generationPrompt, {
         model,
         quality: 'hd',
@@ -61,12 +104,10 @@ Ultra high resolution.`;
       if (result.imageUrl) {
         let finalImage = result.imageUrl;
         
-        // Apply border if selected
         if (border !== 'none') {
           finalImage = await applyBorderToImage(finalImage, border);
         }
         
-        // Add bleed margin if toggled on
         if (addBleed) {
           finalImage = await addBleedMargin(finalImage);
         }
@@ -75,7 +116,7 @@ Ultra high resolution.`;
         setPrompt('');
         toast({
           title: 'Page created!',
-          description: 'Your detailed coloring page has been added to the book.',
+          description: 'Your coloring page has been added to the book.',
         });
       } else {
         throw new Error('No image was generated');
@@ -100,7 +141,7 @@ Ultra high resolution.`;
         </div>
         <div>
           <h3 className="font-semibold text-foreground">Generate New Page</h3>
-          <p className="text-sm text-muted-foreground">Create detailed adult coloring pages</p>
+          <p className="text-sm text-muted-foreground">Choose a style that fits your mood</p>
         </div>
       </div>
 
@@ -121,28 +162,31 @@ Ultra high resolution.`;
           </Select>
         </div>
 
-        {/* Art Style */}
-        <div className="space-y-2">
-          <Label>Art Style</Label>
+        {/* Art Style Selection */}
+        <div className="space-y-3">
+          <Label>Coloring Style</Label>
           <RadioGroup
             value={artStyle}
-            onValueChange={(v) => setArtStyle(v as 'line_art' | 'convert')}
-            className="flex gap-4"
+            onValueChange={(v) => setArtStyle(v as ArtStyle)}
+            className="grid grid-cols-1 sm:grid-cols-2 gap-3"
           >
-            <div className="flex items-center space-x-2">
-              <RadioGroupItem value="line_art" id="line_art" />
-              <Label htmlFor="line_art" className="flex items-center gap-2 cursor-pointer">
-                <PenTool className="h-4 w-4" />
-                Intricate line art
-              </Label>
-            </div>
-            <div className="flex items-center space-x-2">
-              <RadioGroupItem value="convert" id="convert" />
-              <Label htmlFor="convert" className="flex items-center gap-2 cursor-pointer">
-                <Palette className="h-4 w-4" />
-                Realistic to outline
-              </Label>
-            </div>
+            {(Object.entries(artStyleInfo) as [ArtStyle, typeof artStyleInfo[ArtStyle]][]).map(([value, info]) => (
+              <div key={value} className="relative">
+                <RadioGroupItem value={value} id={value} className="peer sr-only" />
+                <Label
+                  htmlFor={value}
+                  className="flex flex-col gap-1 p-3 rounded-lg border-2 cursor-pointer transition-all
+                    peer-data-[state=checked]:border-primary peer-data-[state=checked]:bg-primary/5
+                    hover:bg-muted/50 border-border"
+                >
+                  <div className="flex items-center gap-2 font-medium">
+                    {info.icon}
+                    {info.label}
+                  </div>
+                  <p className="text-xs text-muted-foreground">{info.description}</p>
+                </Label>
+              </div>
+            ))}
           </RadioGroup>
         </div>
 
@@ -165,13 +209,15 @@ Ultra high resolution.`;
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="prompt">Page Description</Label>
+          <Label htmlFor="prompt">What would you like to color?</Label>
           <Textarea
             id="prompt"
-            placeholder="e.g., A majestic lion with intricate mane patterns, realistic anatomy, surrounded by African savanna flora with detailed leaves and grass..."
+            placeholder={artStyle === 'realistic_shading' 
+              ? "e.g., A single apple with clear light and shadow zones..."
+              : "e.g., A peaceful cat sleeping in a sunny window..."}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            rows={4}
+            rows={3}
             disabled={loading}
             className="resize-none"
           />
@@ -181,7 +227,7 @@ Ultra high resolution.`;
           {loading ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Generating detailed page...
+              Generating page...
             </>
           ) : (
             <>
