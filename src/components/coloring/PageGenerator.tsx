@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Wand2, Palette, PenTool, Sun, Brush } from 'lucide-react';
+import { Loader2, Wand2, Palette, PenTool, Sun, Brush, Download } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import BorderSelect from './BorderSelect';
 import { applyBorderToImage } from '@/lib/applyBorderToImage';
@@ -49,8 +49,18 @@ const PageGenerator = ({ bookId: _bookId, onPageGenerated }: PageGeneratorProps)
   const [border, setBorder] = useState<BorderTemplateId>('none');
   const [model, setModel] = useState<ImageModel>('dall-e-3');
   const [addBleed, setAddBleed] = useState(false);
+  const [saveLocally, setSaveLocally] = useState(false);
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
+
+  const downloadImage = (dataUrl: string, filename: string) => {
+    const link = document.createElement('a');
+    link.href = dataUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   const buildPrompt = (basePrompt: string, style: ArtStyle): string => {
     const prompts: Record<ArtStyle, string> = {
@@ -111,13 +121,29 @@ Ultra high resolution.`,
         if (addBleed) {
           finalImage = await addBleedMargin(finalImage);
         }
+
+        // Download locally if enabled
+        if (saveLocally) {
+          const timestamp = Date.now();
+          const sanitizedPrompt = prompt.trim().slice(0, 30).replace(/[^a-zA-Z0-9]/g, '_');
+          const filename = `coloring_${sanitizedPrompt}_${timestamp}.png`;
+          downloadImage(finalImage, filename);
+          toast({
+            title: 'Downloaded!',
+            description: 'Image saved to your downloads folder.',
+          });
+        }
         
-        await onPageGenerated(prompt.trim(), finalImage, artStyle);
+        // Still save to cloud unless local-only
+        if (!saveLocally) {
+          await onPageGenerated(prompt.trim(), finalImage, artStyle);
+          toast({
+            title: 'Page created!',
+            description: 'Your coloring page has been added to the book.',
+          });
+        }
+        
         setPrompt('');
-        toast({
-          title: 'Page created!',
-          description: 'Your coloring page has been added to the book.',
-        });
       } else {
         throw new Error('No image was generated');
       }
@@ -204,6 +230,25 @@ Ultra high resolution.`,
             id="bleed-toggle"
             checked={addBleed}
             onCheckedChange={setAddBleed}
+            disabled={loading}
+          />
+        </div>
+
+        {/* Local Save Toggle */}
+        <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border-2 border-dashed border-primary/30">
+          <div className="space-y-0.5">
+            <Label htmlFor="local-toggle" className="cursor-pointer flex items-center gap-2">
+              <Download className="h-4 w-4" />
+              Save to Local Downloads
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              Download directly to your computer (no cloud save)
+            </p>
+          </div>
+          <Switch
+            id="local-toggle"
+            checked={saveLocally}
+            onCheckedChange={setSaveLocally}
             disabled={loading}
           />
         </div>
