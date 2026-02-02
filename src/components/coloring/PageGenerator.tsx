@@ -87,36 +87,62 @@ const PageGenerator = ({ bookId: _bookId, onPageGenerated }: PageGeneratorProps)
   };
 
   const buildPrompt = (basePrompt: string, style: ArtStyle): string => {
+    // KDP coloring book compliant: ONLY pure black outlines on pure white, NO shading/gradients
     const prompts: Record<ArtStyle, string> = {
-      simple: `Create a simple, relaxing black and white coloring page of: ${basePrompt}. 
-Style: Clean, minimal outlines with LARGE open spaces to color. Use thick, smooth lines. 
-Avoid fine details, thin lines, or crowded patterns. Keep it calming and easy to color.
-No shading, no gradients - only simple outlines. Pure white background.
-The design should be beginner-friendly and stress-relieving.
+      simple: `Create a COLORING BOOK PAGE of: ${basePrompt}. 
+
+CRITICAL REQUIREMENTS:
+- PURE BLACK OUTLINES ONLY on pure white background
+- ABSOLUTELY NO shading, NO gray tones, NO gradients, NO filled areas
+- NO hatching, NO crosshatching, NO stippling, NO texture fills
+- Lines must be clean, crisp, and uniform thickness
+- Leave ALL areas inside outlines completely WHITE and empty for coloring
+- Simple, minimal design with LARGE open spaces to color
+- Thick, smooth contour lines only
+- Think: traditional coloring book for relaxation
+- High contrast line art only
 Ultra high resolution.`,
 
-      detailed: `Create a detailed black and white coloring page illustration for adults of: ${basePrompt}. 
-Style: Intricate line art with precise, clean outlines. Include patterns and fine details. 
-No shading, no gradients, no filled solid areas - only outlines and patterns. Pure white background.
-The design should fill the entire image edge-to-edge with no borders.
-Professional adult coloring book quality with sophisticated artistic complexity.
+      detailed: `Create an INTRICATE COLORING BOOK PAGE for adults of: ${basePrompt}. 
+
+CRITICAL REQUIREMENTS:
+- PURE BLACK OUTLINES ONLY on pure white background
+- ABSOLUTELY NO shading, NO gray tones, NO gradients, NO filled areas
+- NO hatching, NO crosshatching, NO stippling - only clean outlines
+- Detail comes from COMPLEX LINE PATTERNS, not from tonal values
+- Include intricate patterns, decorative elements, and fine line work
+- Every single area inside outlines must be completely WHITE and empty
+- Think: adult coloring book with mandalas or zentangle style
+- Professional line art quality with sophisticated complexity
+- High contrast between black lines and white spaces
 Ultra high resolution.`,
 
-      realistic_shading: `Create a realistic grayscale reference illustration of: ${basePrompt} designed to teach shading techniques.
-Style: Divide the image into clearly numbered or labeled ZONES showing different gray tones (light, medium, dark).
-Include a small legend showing the grayscale values for each zone.
-The zones should have clear outlines so users can practice matching the shading.
-Think of it as a "paint by numbers" but for learning realistic shading and tonal values.
-Show how light hits the subject with distinct shadow zones and highlight areas.
-Educational style that teaches value and form. Pure white background.
+      realistic_shading: `Create a COLORING BOOK PAGE with SHADING GUIDE ZONES of: ${basePrompt}. 
+
+CRITICAL REQUIREMENTS:
+- PURE BLACK OUTLINES on pure white background
+- ABSOLUTELY NO filled gray areas - only outline contours
+- Add NUMBERED ZONES inside the outlines to indicate shading levels (1=lightest, 5=darkest)
+- Include a small numbered legend showing which zones should be shaded darker
+- All zones must be WHITE and EMPTY - user fills them in
+- Lines should show form and dimension through contour variation
+- Think: paint-by-numbers but for learning shading technique
+- Each zone is outlined but NOT filled in
+- Educational coloring page teaching light and shadow
 Ultra high resolution.`,
 
-      bold_shapes: `Create a bold, graphic black and white coloring page of: ${basePrompt}.
-Style: Large, clearly defined shapes with THICK black outlines. 
-Use geometric simplification - break the subject into big, easy-to-color sections.
-No thin lines, no intricate details. Think poster-style or stained-glass effect.
-Each section should be large enough for markers or even paint.
-Relaxing and satisfying to color. Pure white background.
+      bold_shapes: `Create a BOLD COLORING BOOK PAGE of: ${basePrompt}.
+
+CRITICAL REQUIREMENTS:
+- PURE BLACK OUTLINES ONLY on pure white background
+- ABSOLUTELY NO shading, NO gray tones, NO gradients, NO filled areas
+- EXTRA THICK black outlines (poster-style weight)
+- Large, clearly defined geometric shapes
+- Simplified forms with big sections to color
+- Think: stained glass window or woodcut style
+- Every area inside outlines must be completely WHITE and empty
+- Perfect for markers, crayons, or paint
+- High contrast, bold graphic style
 Ultra high resolution.`,
     };
 
