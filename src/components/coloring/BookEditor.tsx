@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Book, Layers, Wand2, Settings, Upload, ImageIcon } from 'lucide-react';
+import { ArrowLeft, Book, Layers, Wand2, Settings, ImageIcon } from 'lucide-react';
 import { ColoringBook, BookPage } from '@/hooks/useColoringBooks';
 import PageGenerator from './PageGenerator';
 import BatchGenerator from './BatchGenerator';

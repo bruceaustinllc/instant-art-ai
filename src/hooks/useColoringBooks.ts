@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './useAuth';
-import type { TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
+import type { TablesUpdate } from '@/integrations/supabase/types';
 
 export interface ColoringBook {
   id: string;
@@ -12,6 +12,10 @@ export interface ColoringBook {
   status: string;
   created_at: string;
   updated_at: string;
+  // Optional metadata (stored in description as JSON or separate fields if added later)
+  subtitle?: string;
+  author_name?: string;
+  copyright_text?: string;
 }
 
 export interface BookPage {

@@ -64,7 +64,15 @@ const BookSettingsDialog = ({ open, onClose, book, onSave }: BookSettingsDialogP
   const handleSubmit = async (values: BookSettingsFormValues) => {
     setLoading(true);
     try {
-      await onSave(book.id, values);
+      // Convert null to undefined for optional fields
+      const updates: Partial<ColoringBook> = {
+        title: values.title,
+        subtitle: values.subtitle || undefined,
+        description: values.description || undefined,
+        author_name: values.author_name || undefined,
+        copyright_text: values.copyright_text || undefined,
+      };
+      await onSave(book.id, updates);
       toast({
         title: 'Book settings saved!',
         description: 'Your book details have been updated.',

@@ -5,11 +5,11 @@ import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Wand2, Palette, PenTool, Sun, Brush, Download } from 'lucide-react';
+import { Loader2, Wand2, Palette, PenTool, Sun, Brush, Download, Sparkles } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import BorderSelect from './BorderSelect';
 import { applyBorderToImage } from '@/lib/applyBorderToImage';
-import { generateImageWithPuter, type ImageModel } from '@/lib/puterImageGeneration';
+import { generateImageWithPuter, enhancePromptWithKimi, type ImageModel } from '@/lib/puterImageGeneration';
 import { addBleedMargin } from '@/lib/addBleedMargin';
 import type { BorderTemplateId } from '@/lib/pageBorders';
 
@@ -51,7 +51,31 @@ const PageGenerator = ({ bookId: _bookId, onPageGenerated }: PageGeneratorProps)
   const [addBleed, setAddBleed] = useState(false);
   const [saveLocally, setSaveLocally] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [enhancing, setEnhancing] = useState(false);
   const { toast } = useToast();
+
+  const handleEnhancePrompt = async () => {
+    if (!prompt.trim() || enhancing) return;
+    
+    setEnhancing(true);
+    try {
+      const enhanced = await enhancePromptWithKimi(prompt.trim());
+      setPrompt(enhanced);
+      toast({
+        title: 'Prompt enhanced!',
+        description: 'Kimi K2 improved your prompt for better coloring pages.',
+      });
+    } catch (err) {
+      console.error('Enhance error:', err);
+      toast({
+        title: 'Enhancement failed',
+        description: err instanceof Error ? err.message : 'Could not enhance prompt',
+        variant: 'destructive',
+      });
+    } finally {
+      setEnhancing(false);
+    }
+  };
 
   const downloadImage = (dataUrl: string, filename: string) => {
     const link = document.createElement('a');
@@ -254,7 +278,24 @@ Ultra high resolution.`,
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="prompt">What would you like to color?</Label>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="prompt">What would you like to color?</Label>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleEnhancePrompt}
+              disabled={!prompt.trim() || loading || enhancing}
+              className="text-xs"
+            >
+              {enhancing ? (
+                <Loader2 className="h-3 w-3 animate-spin mr-1" />
+              ) : (
+                <Sparkles className="h-3 w-3 mr-1" />
+              )}
+              Enhance with AI
+            </Button>
+          </div>
           <Textarea
             id="prompt"
             placeholder={artStyle === 'realistic_shading' 
@@ -263,7 +304,7 @@ Ultra high resolution.`,
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             rows={3}
-            disabled={loading}
+            disabled={loading || enhancing}
             className="resize-none"
           />
         </div>
