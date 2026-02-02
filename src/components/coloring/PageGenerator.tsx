@@ -117,18 +117,19 @@ CRITICAL REQUIREMENTS:
 - High contrast between black lines and white spaces
 Ultra high resolution.`,
 
-      realistic_shading: `Create a COLORING BOOK PAGE with SHADING GUIDE ZONES of: ${basePrompt}. 
+      realistic_shading: `Create a COLORING BOOK PAGE with CONTOUR SHADING LINES of: ${basePrompt}. 
 
 CRITICAL REQUIREMENTS:
 - PURE BLACK OUTLINES on pure white background
-- ABSOLUTELY NO filled gray areas - only outline contours
-- Add NUMBERED ZONES inside the outlines to indicate shading levels (1=lightest, 5=darkest)
-- Include a small numbered legend showing which zones should be shaded darker
-- All zones must be WHITE and EMPTY - user fills them in
-- Lines should show form and dimension through contour variation
-- Think: paint-by-numbers but for learning shading technique
-- Each zone is outlined but NOT filled in
-- Educational coloring page teaching light and shadow
+- ABSOLUTELY NO filled gray areas, NO gradients, NO solid shading
+- Use CONTOUR LINES like a topographic map to show form and depth
+- Shadow areas: draw MORE closely-spaced parallel contour lines
+- Light areas: draw FEWER or no contour lines (leave mostly white)
+- All spaces between lines must be WHITE and EMPTY for coloring
+- Lines follow the 3D form of the subject (like wood grain or fingerprint patterns)
+- Think: engraving style or crosshatch illustration WITHOUT filled areas
+- The density of lines suggests where shadows fall - user colors between them
+- Clean, professional line work showing depth through line spacing only
 Ultra high resolution.`,
 
       bold_shapes: `Create a BOLD COLORING BOOK PAGE of: ${basePrompt}.
