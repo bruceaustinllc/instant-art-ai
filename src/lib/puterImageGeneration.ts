@@ -1,11 +1,13 @@
 // Puter.js image generation utility
 // Uses the free "User-Pays" model where users authenticate with Puter
+// Supports Kimi K2 for text/chat and DALL-E 3, SD3, Flux for images
 
 declare global {
   interface Window {
     puter: {
       ai: {
         txt2img: (prompt: string, options?: Record<string, unknown>) => Promise<HTMLImageElement>;
+        chat: (prompt: string, options?: Record<string, unknown>) => Promise<string>;
       };
     };
   }
@@ -18,13 +20,26 @@ export type ImageModel =
   | 'gpt-image-1'
   | 'gpt-image-1-mini';
 
+export type ChatModel = 
+  | 'kimi-k2'
+  | 'claude-sonnet'
+  | 'gpt-4o';
+
 export interface PuterGenerationOptions {
   model?: ImageModel;
   quality?: 'low' | 'medium' | 'high' | 'hd';
 }
 
+export interface PuterChatOptions {
+  model?: ChatModel;
+}
+
 export interface PuterGenerationResult {
   imageUrl: string;
+}
+
+export interface PuterChatResult {
+  response: string;
 }
 
 /**
@@ -118,4 +133,67 @@ export async function generateImageWithPuter(
 
     throw new Error('Failed to generate image with Puter. Please try again.');
   }
+}
+
+/**
+ * Chat with Kimi K2 using Puter's free AI
+ * Useful for generating enhanced prompts or creative suggestions
+ */
+export async function chatWithKimi(
+  prompt: string,
+  options: PuterChatOptions = {}
+): Promise<PuterChatResult> {
+  if (!window.puter?.ai?.chat) {
+    throw new Error('Puter.js is not loaded. Please refresh the page.');
+  }
+
+  const model = options.model || 'kimi-k2';
+
+  try {
+    const response = await window.puter.ai.chat(prompt, { model });
+    
+    if (typeof response === 'string') {
+      return { response };
+    }
+    
+    // Handle object response
+    const anyResponse: any = response;
+    if (anyResponse?.message?.content) {
+      return { response: anyResponse.message.content };
+    }
+    if (anyResponse?.content) {
+      return { response: anyResponse.content };
+    }
+    
+    return { response: String(response) };
+  } catch (error) {
+    console.error('Puter Kimi K2 chat error:', error);
+    
+    if (error instanceof Error) {
+      throw new Error(error.message || 'Failed to chat with Kimi K2.');
+    }
+    
+    throw new Error('Failed to chat with Kimi K2. Please try again.');
+  }
+}
+
+/**
+ * Use Kimi K2 to enhance a coloring page prompt
+ */
+export async function enhancePromptWithKimi(basePrompt: string): Promise<string> {
+  const systemPrompt = `You are a coloring book prompt specialist. Given a simple idea, enhance it into a detailed prompt for generating a black and white coloring page. 
+  
+Requirements:
+- Output ONLY black outlines on white background
+- NO shading, NO gray tones, NO gradients
+- Clean, clear lines suitable for coloring
+- Large open spaces for easy coloring
+- Keep the enhanced prompt concise (under 100 words)
+
+User's idea: "${basePrompt}"
+
+Respond with ONLY the enhanced prompt, nothing else.`;
+
+  const result = await chatWithKimi(systemPrompt);
+  return result.response.trim();
 }
