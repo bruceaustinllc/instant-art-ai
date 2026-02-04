@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Book, Layers, Wand2, Settings, ImageIcon } from 'lucide-react';
+import { ArrowLeft, Book, Layers, Wand2, Settings, ImageIcon, LayoutList } from 'lucide-react';
 import { ColoringBook, BookPage } from '@/hooks/useColoringBooks';
 import PageGenerator from './PageGenerator';
 import BatchGenerator from './BatchGenerator';
@@ -10,6 +10,7 @@ import PDFExporter from './PDFExporter';
 import BookSettingsDialog from './BookSettingsDialog';
 import PDFPreview from './PDFPreview';
 import ExportAllButton from './ExportAllButton';
+import PageManager from './PageManager';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface BookEditorProps {
@@ -39,6 +40,18 @@ const BookEditor = ({
 }: BookEditorProps) => {
   const [generatorTab, setGeneratorTab] = useState('single');
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+  const [pageManagerOpen, setPageManagerOpen] = useState(false);
+
+  // If page manager is open, show it full screen
+  if (pageManagerOpen) {
+    return (
+      <PageManager 
+        bookId={book.id} 
+        bookTitle={book.title} 
+        onClose={() => setPageManagerOpen(false)} 
+      />
+    );
+  }
 
   return (
     <div className="space-y-8">
@@ -69,6 +82,12 @@ const BookEditor = ({
           <Button variant="ghost" size="icon" onClick={() => setSettingsDialogOpen(true)}>
             <Settings className="h-4 w-4" />
             <span className="sr-only">Book Settings</span>
+          </Button>
+          
+          <Button variant="outline" size="sm" onClick={() => setPageManagerOpen(true)}>
+            <LayoutList className="h-4 w-4 mr-2" />
+            <span className="hidden sm:inline">Page Manager</span>
+            <span className="sm:hidden">Manage</span>
           </Button>
           
           <ExportAllButton bookId={book.id} bookTitle={book.title} />

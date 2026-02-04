@@ -27,6 +27,9 @@ export interface BookPage {
   page_number: number;
   art_style: string;
   created_at: string;
+  category?: string | null;
+  triage_status?: string;
+  rating?: number | null;
 }
 
 export const useColoringBooks = () => {
@@ -254,7 +257,7 @@ export const useColoringBooks = () => {
         .single();
 
       if (error) throw error;
-      setPages(prev => [...prev, data]);
+      setPages(prev => [...prev, data as BookPage]);
       return data;
     } catch (err) {
       console.error('Error adding page:', err);
