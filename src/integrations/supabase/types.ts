@@ -18,31 +18,40 @@ export type Database = {
         Row: {
           art_style: string
           book_id: string
+          category: string | null
           created_at: string
           id: string
           image_url: string
           page_number: number
           prompt: string
+          rating: number | null
+          triage_status: string | null
           user_id: string
         }
         Insert: {
           art_style?: string
           book_id: string
+          category?: string | null
           created_at?: string
           id?: string
           image_url: string
           page_number: number
           prompt: string
+          rating?: number | null
+          triage_status?: string | null
           user_id: string
         }
         Update: {
           art_style?: string
           book_id?: string
+          category?: string | null
           created_at?: string
           id?: string
           image_url?: string
           page_number?: number
           prompt?: string
+          rating?: number | null
+          triage_status?: string | null
           user_id?: string
         }
         Relationships: [
