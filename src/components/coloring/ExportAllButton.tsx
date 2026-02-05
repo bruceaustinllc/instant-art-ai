@@ -1,8 +1,9 @@
- import { useState, useEffect } from 'react';
+ import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
  import { Download, Loader2, CheckCircle, ExternalLink } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
+ import { Progress } from '@/components/ui/progress';
 
 interface ExportAllButtonProps {
   bookId: string;
@@ -15,24 +16,99 @@ const ExportAllButton = ({ bookId, bookTitle }: ExportAllButtonProps) => {
    const [status, setStatus] = useState<ExportStatus>('idle');
    const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
    const [pageCount, setPageCount] = useState(0);
- 
+   const [progress, setProgress] = useState({ current: 0, total: 0 });
+   const [jobId, setJobId] = useState<string | null>(null);
+   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
    // Reset state when book changes
    useEffect(() => {
      setStatus('idle');
      setDownloadUrl(null);
      setPageCount(0);
- 
+     setProgress({ current: 0, total: 0 });
+     setJobId(null);
+     if (pollIntervalRef.current) {
+       clearInterval(pollIntervalRef.current);
+       pollIntervalRef.current = null;
+     }
    }, [bookId]);
+ 
+   // Cleanup on unmount
+   useEffect(() => {
+     return () => {
+       if (pollIntervalRef.current) {
+         clearInterval(pollIntervalRef.current);
+       }
+     };
+   }, []);
+ 
+   // Poll for job status
+   useEffect(() => {
+     if (!jobId || status !== 'exporting') return;
+ 
+     const pollStatus = async () => {
+       const { data, error } = await supabase
+         .from('export_jobs')
+         .select('status, processed_pages, total_pages, download_url, error_message')
+         .eq('id', jobId)
+         .single();
+ 
+       if (error) {
+         console.error('Poll error:', error);
+         return;
+       }
+ 
+       if (data) {
+         setProgress({ current: data.processed_pages, total: data.total_pages });
+ 
+         if (data.status === 'completed' && data.download_url) {
+           setStatus('complete');
+           setDownloadUrl(data.download_url);
+           setPageCount(data.total_pages);
+           if (pollIntervalRef.current) {
+             clearInterval(pollIntervalRef.current);
+             pollIntervalRef.current = null;
+           }
+           toast({
+             title: 'Export complete!',
+             description: `${data.total_pages} images ready for download.`,
+           });
+         } else if (data.status === 'failed') {
+           setStatus('error');
+           if (pollIntervalRef.current) {
+             clearInterval(pollIntervalRef.current);
+             pollIntervalRef.current = null;
+           }
+           toast({
+             title: 'Export failed',
+             description: data.error_message || 'There was an error exporting images.',
+             variant: 'destructive',
+           });
+         }
+       }
+     };
+ 
+     // Poll immediately, then every 2 seconds
+     pollStatus();
+     pollIntervalRef.current = setInterval(pollStatus, 2000);
+ 
+     return () => {
+       if (pollIntervalRef.current) {
+         clearInterval(pollIntervalRef.current);
+         pollIntervalRef.current = null;
+       }
+     };
+   }, [jobId, status]);
 
    const handleExportAll = async () => {
      setStatus('exporting');
      setDownloadUrl(null);
+     setProgress({ current: 0, total: 0 });
  
     try {
        toast({
          title: 'Creating ZIP archive',
-         description: 'Building your download in the background. This may take a moment for large books...',
+         description: 'Starting background export. You can continue working while it processes...',
        });
  
        const { data, error } = await supabase.functions.invoke('export-book-zip', {
@@ -47,14 +123,11 @@ const ExportAllButton = ({ bookId, bookTitle }: ExportAllButtonProps) => {
          throw new Error(data.error);
       }
 
-       setDownloadUrl(data.downloadUrl);
-       setPageCount(data.pageCount);
-       setStatus('complete');
- 
-      toast({
-        title: 'Export complete!',
-         description: `${data.pageCount} images ready for download.`,
-      });
+       // Job started, begin polling
+       if (data?.jobId) {
+         setJobId(data.jobId);
+         setProgress({ current: 0, total: data.totalPages || 0 });
+       }
     } catch (error) {
       console.error('Export error:', error);
        setStatus('error');
@@ -77,7 +150,12 @@ const ExportAllButton = ({ bookId, bookTitle }: ExportAllButtonProps) => {
      setStatus('idle');
      setDownloadUrl(null);
      setPageCount(0);
- 
+     setProgress({ current: 0, total: 0 });
+     setJobId(null);
+     if (pollIntervalRef.current) {
+       clearInterval(pollIntervalRef.current);
+       pollIntervalRef.current = null;
+     }
    };
  
    if (status === 'complete' && downloadUrl) {
@@ -119,24 +197,36 @@ const ExportAllButton = ({ bookId, bookTitle }: ExportAllButtonProps) => {
    }
  
   return (
-    <Button
-      variant="outline"
-      onClick={handleExportAll}
-       disabled={status === 'exporting'}
-      className="gap-2"
-    >
-       {status === 'exporting' ? (
-        <>
-          <Loader2 className="h-4 w-4 animate-spin" />
-           Building ZIP...
-        </>
-      ) : (
-        <>
-          <Download className="h-4 w-4" />
-          Export All
-        </>
-      )}
-    </Button>
+     <div className="flex items-center gap-2">
+       <Button
+         variant="outline"
+         onClick={handleExportAll}
+         disabled={status === 'exporting'}
+         className="gap-2"
+       >
+         {status === 'exporting' ? (
+           <>
+             <Loader2 className="h-4 w-4 animate-spin" />
+             {progress.total > 0 
+               ? `${progress.current}/${progress.total}`
+               : 'Starting...'}
+           </>
+         ) : (
+           <>
+             <Download className="h-4 w-4" />
+             Export All
+           </>
+         )}
+       </Button>
+       {status === 'exporting' && progress.total > 0 && (
+         <div className="w-24">
+           <Progress 
+             value={(progress.current / progress.total) * 100} 
+             className="h-2"
+           />
+         </div>
+       )}
+     </div>
   );
 };
 
