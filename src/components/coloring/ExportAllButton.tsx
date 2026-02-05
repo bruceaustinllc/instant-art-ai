@@ -124,6 +124,15 @@ const ExportAllButton = ({ bookId, bookTitle }: ExportAllButtonProps) => {
          setJobId(existingJob.id);
          setProgress({ current: existingJob.processed_pages, total: existingJob.total_pages });
          setStatus('exporting');
+
+         // Kick the backend to resume in case the job chain stalled
+         const { error: resumeError } = await supabase.functions.invoke('export-book-zip', {
+           body: { jobId: existingJob.id },
+         });
+         if (resumeError) {
+           console.warn('Resume export error:', resumeError);
+         }
+
          toast({
            title: 'Export already in progress',
            description: `Resuming tracking: ${existingJob.processed_pages}/${existingJob.total_pages} pages processed.`,
