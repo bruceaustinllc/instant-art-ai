@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.process-generation-job]
 verify_jwt = false
+ 
+ [functions.export-book-zip]
+ verify_jwt = false
