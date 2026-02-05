@@ -8,23 +8,37 @@
      "authorization, x-client-info, apikey, content-type",
  };
  
-const BATCH_SIZE = 10; // Process 10 pages at a time to avoid CPU timeout
+// NOTE: book_pages.image_url currently stores base64 data URLs for many users.
+// Decoding + uploading multiple pages in one invocation can exceed strict CPU limits,
+// so we intentionally process 1 page per invocation.
+const BATCH_SIZE = 1;
  
  Deno.serve(async (req) => {
    if (req.method === "OPTIONS") {
      return new Response(null, { headers: corsHeaders });
    }
  
-   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-   const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
  
    try {
      const body = await req.json();
      const { bookId, bookTitle, jobId, isInternalCall } = body;
  
-     // For internal calls (background processing), skip auth
-     if (!isInternalCall) {
+      // Internal calls (background processing): require service-role auth
+      if (isInternalCall) {
+        const authHeader = req.headers.get("Authorization") || "";
+        if (authHeader !== `Bearer ${supabaseServiceKey}`) {
+          return new Response(JSON.stringify({ error: "Unauthorized" }), {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+
+      // External calls (user-initiated): require user auth
+      if (!isInternalCall) {
        const authHeader = req.headers.get("Authorization");
        if (!authHeader?.startsWith("Bearer ")) {
          return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -112,8 +126,8 @@ const BATCH_SIZE = 10; // Process 10 pages at a time to avoid CPU timeout
  
        console.log(`Created export job ${job.id} for ${count} pages`);
  
-      // Trigger first batch processing via self-invoke
-      await invokeNextBatch(job.id, supabaseUrl);
+        // Trigger first page processing via self-invoke
+        await invokeNextBatch(job.id, supabaseUrl, supabaseAnonKey, supabaseServiceKey);
  
        return new Response(
          JSON.stringify({
@@ -154,20 +168,26 @@ const BATCH_SIZE = 10; // Process 10 pages at a time to avoid CPU timeout
    }
  });
  
-async function invokeNextBatch(jobId: string, supabaseUrl: string) {
+async function invokeNextBatch(
+  jobId: string,
+  supabaseUrl: string,
+  anonKey: string,
+  serviceKey: string
+) {
   const functionUrl = `${supabaseUrl}/functions/v1/export-book-zip`;
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  
+
   try {
-    // Fire-and-forget - don't await the full response
+    // Fire-and-forget (new invocation gets fresh CPU budget)
     fetch(functionUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${serviceKey}`,
+        // Some environments expect an apikey header even when verify_jwt=false.
+        apikey: anonKey,
+        Authorization: `Bearer ${serviceKey}`,
       },
       body: JSON.stringify({ jobId, isInternalCall: true }),
-    }).catch(err => console.error("Self-invoke error:", err));
+    }).catch((err) => console.error("Self-invoke error:", err));
   } catch (error) {
     console.error("Failed to invoke next batch:", error);
   }
@@ -229,8 +249,11 @@ async function invokeNextBatch(jobId: string, supabaseUrl: string) {
  
      if (fetchError) throw fetchError;
  
-     // Store images temporarily in storage
-     for (const page of pages || []) {
+      // Store images temporarily in storage (1 page per invocation)
+      let newOffset = job.current_offset;
+      let newProcessed = job.processed_pages;
+
+      for (const page of pages || []) {
        const base64Match = page.image_url?.match(
          /^data:image\/(\w+);base64,(.+)$/
        );
@@ -243,29 +266,27 @@ async function invokeNextBatch(jobId: string, supabaseUrl: string) {
          const filename = `${String(page.page_number).padStart(4, "0")}_${shortId}.png`;
          const storagePath = `export-temp/${jobId}/${filename}`;
  
-         await supabase.storage
+          const { error: uploadError } = await supabase.storage
            .from("coloring-pages")
            .upload(storagePath, binaryData, {
              contentType: `image/${ext || "png"}`,
              upsert: true,
            });
+
+          if (uploadError) throw uploadError;
+
+          // Update progress immediately so UI doesn't stick at 0 if we time out later.
+          newOffset += 1;
+          newProcessed += 1;
+          await supabase
+            .from("export_jobs")
+            .update({ current_offset: newOffset, processed_pages: newProcessed })
+            .eq("id", jobId);
        }
      }
- 
-     // Update job progress
-     const newOffset = job.current_offset + pageIds.length;
-     const newProcessed = job.processed_pages + pageIds.length;
- 
-     await supabase
-       .from("export_jobs")
-       .update({
-         current_offset: newOffset,
-         processed_pages: newProcessed,
-       })
-       .eq("id", jobId);
- 
-    // Self-invoke for next batch (non-blocking)
-    await invokeNextBatch(jobId, supabaseUrl);
+
+      // Self-invoke for next page (non-blocking)
+      await invokeNextBatch(jobId, supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, serviceKey);
    } catch (error) {
      console.error(`Export batch error for job ${jobId}:`, error);
      await supabase
