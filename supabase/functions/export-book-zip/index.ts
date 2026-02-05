@@ -268,6 +268,49 @@ const BATCH_SIZE = 1;
  async function sleep(ms: number) {
    return new Promise((resolve) => setTimeout(resolve, ms));
  }
+
+function getErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  if (err && typeof err === "object") {
+    const anyErr = err as any;
+    if (typeof anyErr.message === "string") return anyErr.message;
+    try {
+      return JSON.stringify(anyErr);
+    } catch {
+      return "Unknown error";
+    }
+  }
+  return "Unknown error";
+}
+
+function isTransient(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    m.includes("cloudflare") ||
+    m.includes("internal server error") ||
+    m.includes("error code 500") ||
+    m.includes(" 500") ||
+    m.includes("timeout") ||
+    m.includes("timed out") ||
+    m.includes("econnreset") ||
+    m.includes("network")
+  );
+}
+
+async function withRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
+  let lastErr: unknown = null;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      console.warn(`${label} attempt ${attempt} failed:`, err);
+      if (attempt < MAX_RETRIES) await sleep(RETRY_DELAY_MS * attempt);
+    }
+  }
+  throw (lastErr instanceof Error ? lastErr : new Error(getErrorMessage(lastErr)));
+}
  
  async function invokeNextBatch(
   jobId: string,
@@ -391,14 +434,18 @@ const BATCH_SIZE = 1;
          const filename = `${String(page.page_number).padStart(4, "0")}_${shortId}.png`;
          const storagePath = `export-temp/${jobId}/${filename}`;
  
-          const { error: uploadError } = await supabase.storage
-           .from("coloring-pages")
-           .upload(storagePath, binaryData, {
-             contentType: `image/${ext || "png"}`,
-             upsert: true,
-           });
+           const uploadRes = await withRetry(
+             async () =>
+               await supabase.storage
+                 .from("coloring-pages")
+                 .upload(storagePath, binaryData, {
+                   contentType: `image/${ext || "png"}`,
+                   upsert: true,
+                 }),
+             "storage.upload"
+           );
 
-          if (uploadError) throw uploadError;
+           if ((uploadRes as any)?.error) throw (uploadRes as any).error;
 
           // Update progress immediately so UI doesn't stick at 0 if we time out later.
           newOffset += 1;
@@ -418,18 +465,41 @@ const BATCH_SIZE = 1;
          serviceKey,
          { throwOnFailure: true }
        );
-   } catch (error) {
-     console.error(`Export batch error for job ${jobId}:`, error);
-     await supabase
-       .from("export_jobs")
-       .update({
-         status: "failed",
-         error_message:
-           error instanceof Error ? error.message : "Export failed",
-         completed_at: new Date().toISOString(),
-       })
-       .eq("id", jobId);
-   }
+    } catch (error) {
+      const message = getErrorMessage(error);
+      console.error(`Export batch error for job ${jobId}:`, message);
+
+      // If this looks like a transient infra/network issue, keep the job resumable
+      // and try to kick the chain forward again.
+      if (isTransient(message)) {
+        await supabase
+          .from("export_jobs")
+          .update({
+            status: "processing",
+            error_message: `Transient error (will retry): ${message}`.slice(0, 500),
+          })
+          .eq("id", jobId);
+
+        // Small backoff, then try to self-invoke again.
+        await sleep(1500);
+        await invokeNextBatch(
+          jobId,
+          supabaseUrl,
+          Deno.env.get("SUPABASE_ANON_KEY")!,
+          serviceKey
+        );
+        return;
+      }
+
+      await supabase
+        .from("export_jobs")
+        .update({
+          status: "failed",
+          error_message: message.slice(0, 500),
+          completed_at: new Date().toISOString(),
+        })
+        .eq("id", jobId);
+    }
  }
  
  async function finalizeExport(
