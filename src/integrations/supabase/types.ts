@@ -97,6 +97,62 @@ export type Database = {
         }
         Relationships: []
       }
+      export_jobs: {
+        Row: {
+          book_id: string
+          book_title: string
+          completed_at: string | null
+          created_at: string
+          current_offset: number
+          download_url: string | null
+          error_message: string | null
+          id: string
+          processed_pages: number
+          status: string
+          total_pages: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          book_id: string
+          book_title: string
+          completed_at?: string | null
+          created_at?: string
+          current_offset?: number
+          download_url?: string | null
+          error_message?: string | null
+          id?: string
+          processed_pages?: number
+          status?: string
+          total_pages?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          book_id?: string
+          book_title?: string
+          completed_at?: string | null
+          created_at?: string
+          current_offset?: number
+          download_url?: string | null
+          error_message?: string | null
+          id?: string
+          processed_pages?: number
+          status?: string
+          total_pages?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "export_jobs_book_id_fkey"
+            columns: ["book_id"]
+            isOneToOne: false
+            referencedRelation: "coloring_books"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       generation_jobs: {
         Row: {
           add_bleed: boolean
