@@ -1,6 +1,9 @@
  // deno-lint-ignore-file no-explicit-any
  import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
- import JSZip from "https://esm.sh/jszip@3.10.1";
+  import JSZip from "https://esm.sh/jszip@3.10.1";
+ 
+ const MAX_RETRIES = 3;
+ const RETRY_DELAY_MS = 1000;
  
  const corsHeaders = {
    "Access-Control-Allow-Origin": "*",
@@ -168,7 +171,11 @@ const BATCH_SIZE = 1;
    }
  });
  
-async function invokeNextBatch(
+ async function sleep(ms: number) {
+   return new Promise(resolve => setTimeout(resolve, ms));
+ }
+ 
+ async function invokeNextBatch(
   jobId: string,
   supabaseUrl: string,
   anonKey: string,
@@ -177,17 +184,37 @@ async function invokeNextBatch(
   const functionUrl = `${supabaseUrl}/functions/v1/export-book-zip`;
 
   try {
-    // Fire-and-forget (new invocation gets fresh CPU budget)
-    fetch(functionUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        // Some environments expect an apikey header even when verify_jwt=false.
-        apikey: anonKey,
-        Authorization: `Bearer ${serviceKey}`,
-      },
-      body: JSON.stringify({ jobId, isInternalCall: true }),
-    }).catch((err) => console.error("Self-invoke error:", err));
+     // Fire-and-forget with retry logic for transient errors
+     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+       try {
+         const res = await fetch(functionUrl, {
+           method: "POST",
+           headers: {
+             "Content-Type": "application/json",
+             apikey: anonKey,
+             Authorization: `Bearer ${serviceKey}`,
+           },
+           body: JSON.stringify({ jobId, isInternalCall: true }),
+         });
+         
+         if (res.ok || res.status < 500) {
+           // Success or client error (no point retrying)
+           return;
+         }
+         
+         // 5xx error - retry after delay
+         console.warn(`Self-invoke attempt ${attempt} failed with ${res.status}, retrying...`);
+         if (attempt < MAX_RETRIES) {
+           await sleep(RETRY_DELAY_MS * attempt);
+         }
+       } catch (err) {
+         console.warn(`Self-invoke attempt ${attempt} error:`, err);
+         if (attempt < MAX_RETRIES) {
+           await sleep(RETRY_DELAY_MS * attempt);
+         }
+       }
+     }
+     console.error("All self-invoke retries failed");
   } catch (error) {
     console.error("Failed to invoke next batch:", error);
   }
