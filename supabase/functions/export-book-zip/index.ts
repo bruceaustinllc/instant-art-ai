@@ -2,18 +2,13 @@
  import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
  import JSZip from "https://esm.sh/jszip@3.10.1";
  
- // Declare EdgeRuntime for Supabase Edge Functions
- declare const EdgeRuntime: {
-   waitUntil: (promise: Promise<unknown>) => void;
- };
- 
  const corsHeaders = {
    "Access-Control-Allow-Origin": "*",
    "Access-Control-Allow-Headers":
      "authorization, x-client-info, apikey, content-type",
  };
  
- const BATCH_SIZE = 20; // Process 20 pages at a time to avoid timeout
+const BATCH_SIZE = 10; // Process 10 pages at a time to avoid CPU timeout
  
  Deno.serve(async (req) => {
    if (req.method === "OPTIONS") {
@@ -117,14 +112,8 @@
  
        console.log(`Created export job ${job.id} for ${count} pages`);
  
-       // Start background processing using waitUntil if available, otherwise inline
-       const bgPromise = processNextBatch(job.id, supabaseUrl, supabaseServiceKey);
-       if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
-         EdgeRuntime.waitUntil(bgPromise);
-       } else {
-         // Fallback: don't await, let it run
-         bgPromise.catch((e) => console.error("Background processing error:", e));
-       }
+      // Trigger first batch processing via self-invoke
+      await invokeNextBatch(job.id, supabaseUrl);
  
        return new Response(
          JSON.stringify({
@@ -165,6 +154,25 @@
    }
  });
  
+async function invokeNextBatch(jobId: string, supabaseUrl: string) {
+  const functionUrl = `${supabaseUrl}/functions/v1/export-book-zip`;
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  
+  try {
+    // Fire-and-forget - don't await the full response
+    fetch(functionUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${serviceKey}`,
+      },
+      body: JSON.stringify({ jobId, isInternalCall: true }),
+    }).catch(err => console.error("Self-invoke error:", err));
+  } catch (error) {
+    console.error("Failed to invoke next batch:", error);
+  }
+}
+
  async function processNextBatch(
    jobId: string,
    supabaseUrl: string,
@@ -256,9 +264,8 @@
        })
        .eq("id", jobId);
  
-     // Continue processing with delay
-     await new Promise((resolve) => setTimeout(resolve, 500));
-     await processNextBatch(jobId, supabaseUrl, serviceKey);
+    // Self-invoke for next batch (non-blocking)
+    await invokeNextBatch(jobId, supabaseUrl);
    } catch (error) {
      console.error(`Export batch error for job ${jobId}:`, error);
      await supabase
