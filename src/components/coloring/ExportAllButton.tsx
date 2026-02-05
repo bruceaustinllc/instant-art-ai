@@ -19,6 +19,7 @@ const ExportAllButton = ({ bookId, bookTitle }: ExportAllButtonProps) => {
    const [progress, setProgress] = useState({ current: 0, total: 0 });
    const [jobId, setJobId] = useState<string | null>(null);
    const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+   const actionInProgressRef = useRef(false);
 
    // Reset state when book changes
    useEffect(() => {
@@ -101,11 +102,39 @@ const ExportAllButton = ({ bookId, bookTitle }: ExportAllButtonProps) => {
    }, [jobId, status]);
 
    const handleExportAll = async () => {
-     setStatus('exporting');
-     setDownloadUrl(null);
-     setProgress({ current: 0, total: 0 });
+     // Prevent rapid double-clicks
+     if (actionInProgressRef.current || status === 'exporting') {
+       return;
+     }
+     actionInProgressRef.current = true;
  
-    try {
+     try {
+       // Check for existing pending/processing job for this book
+       const { data: existingJob } = await supabase
+         .from('export_jobs')
+         .select('id, status, processed_pages, total_pages')
+         .eq('book_id', bookId)
+         .in('status', ['pending', 'processing'])
+         .order('created_at', { ascending: false })
+         .limit(1)
+         .maybeSingle();
+ 
+       if (existingJob) {
+         // Resume tracking existing job instead of creating new one
+         setJobId(existingJob.id);
+         setProgress({ current: existingJob.processed_pages, total: existingJob.total_pages });
+         setStatus('exporting');
+         toast({
+           title: 'Export already in progress',
+           description: `Resuming tracking: ${existingJob.processed_pages}/${existingJob.total_pages} pages processed.`,
+         });
+         return;
+       }
+ 
+       setStatus('exporting');
+       setDownloadUrl(null);
+       setProgress({ current: 0, total: 0 });
+ 
        toast({
          title: 'Creating ZIP archive',
          description: 'Starting background export. You can continue working while it processes...',
@@ -117,28 +146,30 @@ const ExportAllButton = ({ bookId, bookTitle }: ExportAllButtonProps) => {
  
        if (error) {
          throw error;
-      }
-
+       }
+ 
        if (data?.error) {
          throw new Error(data.error);
-      }
-
+       }
+ 
        // Job started, begin polling
        if (data?.jobId) {
          setJobId(data.jobId);
          setProgress({ current: 0, total: data.totalPages || 0 });
        }
-    } catch (error) {
-      console.error('Export error:', error);
+     } catch (error: unknown) {
+       console.error('Export error:', error);
        setStatus('error');
  
-      toast({
-        title: 'Export failed',
+       toast({
+         title: 'Export failed',
          description: error instanceof Error ? error.message : 'There was an error exporting images. Please try again.',
-        variant: 'destructive',
-      });
-    }
-  };
+         variant: 'destructive',
+       });
+     } finally {
+       actionInProgressRef.current = false;
+     }
+   };
 
    const handleDownload = () => {
      if (downloadUrl) {
