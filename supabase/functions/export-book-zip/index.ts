@@ -294,7 +294,10 @@ function isTransient(message: string): boolean {
     m.includes("timeout") ||
     m.includes("timed out") ||
     m.includes("econnreset") ||
-    m.includes("network")
+    m.includes("network") ||
+    m.includes("unexpected end of file") ||
+    m.includes("connection closed") ||
+    m.includes("statement timeout")
   );
 }
 
