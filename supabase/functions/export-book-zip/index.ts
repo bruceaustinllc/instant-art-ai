@@ -63,7 +63,61 @@ const BATCH_SIZE = 1;
          });
        }
  
-       const userId = userData.user.id;
+        const userId = userData.user.id;
+
+        // Allow resuming an existing job (helps when a job gets stuck mid-way)
+        if (jobId && !bookId) {
+          const { data: existingJob, error: existingJobError } = await supabaseAuth
+            .from("export_jobs")
+            .select("id, status, processed_pages, total_pages")
+            .eq("id", jobId)
+            .eq("user_id", userId)
+            .single();
+
+          if (existingJobError || !existingJob) {
+            return new Response(JSON.stringify({ error: "Job not found" }), {
+              status: 404,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+
+          if (existingJob.status === "completed") {
+            return new Response(
+              JSON.stringify({
+                success: true,
+                jobId: existingJob.id,
+                status: existingJob.status,
+                totalPages: existingJob.total_pages,
+              }),
+              { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
+          const supabaseService = createClient(supabaseUrl, supabaseServiceKey);
+          await supabaseService
+            .from("export_jobs")
+            .update({ status: "processing", error_message: null })
+            .eq("id", existingJob.id)
+            .eq("user_id", userId);
+
+          await invokeNextBatch(
+            existingJob.id,
+            supabaseUrl,
+            supabaseAnonKey,
+            supabaseServiceKey
+          );
+
+          return new Response(
+            JSON.stringify({
+              success: true,
+              resumed: true,
+              jobId: existingJob.id,
+              status: "processing",
+              totalPages: existingJob.total_pages,
+            }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
  
        if (!bookId) {
          return new Response(JSON.stringify({ error: "bookId is required" }), {
@@ -105,11 +159,51 @@ const BATCH_SIZE = 1;
          );
        }
  
-       // Create export job
-       const supabaseService = createClient(supabaseUrl, supabaseServiceKey);
+        // Create export job (server-side de-dupe: if a job already exists for this book, resume it)
+        const supabaseService = createClient(supabaseUrl, supabaseServiceKey);
        const safeTitle = (bookTitle || book.title || "coloring-book")
          .replace(/[^a-z0-9]/gi, "_")
          .substring(0, 30);
+
+        const { data: existingJob } = await supabaseService
+          .from("export_jobs")
+          .select("id, status, processed_pages, total_pages")
+          .eq("user_id", userId)
+          .eq("book_id", bookId)
+          .in("status", ["pending", "processing", "failed"])
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (
+          existingJob &&
+          existingJob.total_pages > 0 &&
+          existingJob.processed_pages < existingJob.total_pages
+        ) {
+          await supabaseService
+            .from("export_jobs")
+            .update({ status: "processing", error_message: null })
+            .eq("id", existingJob.id)
+            .eq("user_id", userId);
+
+          await invokeNextBatch(
+            existingJob.id,
+            supabaseUrl,
+            supabaseAnonKey,
+            supabaseServiceKey
+          );
+
+          return new Response(
+            JSON.stringify({
+              success: true,
+              resumed: true,
+              jobId: existingJob.id,
+              status: "processing",
+              totalPages: existingJob.total_pages,
+            }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
  
        const { data: job, error: jobError } = await supabaseService
          .from("export_jobs")
@@ -129,8 +223,8 @@ const BATCH_SIZE = 1;
  
        console.log(`Created export job ${job.id} for ${count} pages`);
  
-        // Trigger first page processing via self-invoke
-        await invokeNextBatch(job.id, supabaseUrl, supabaseAnonKey, supabaseServiceKey);
+         // Trigger first page processing via self-invoke
+         await invokeNextBatch(job.id, supabaseUrl, supabaseAnonKey, supabaseServiceKey);
  
        return new Response(
          JSON.stringify({
@@ -172,52 +266,56 @@ const BATCH_SIZE = 1;
  });
  
  async function sleep(ms: number) {
-   return new Promise(resolve => setTimeout(resolve, ms));
+   return new Promise((resolve) => setTimeout(resolve, ms));
  }
  
  async function invokeNextBatch(
   jobId: string,
   supabaseUrl: string,
   anonKey: string,
-  serviceKey: string
-) {
+  serviceKey: string,
+  opts?: { throwOnFailure?: boolean }
+ ) {
   const functionUrl = `${supabaseUrl}/functions/v1/export-book-zip`;
 
-  try {
-     // Fire-and-forget with retry logic for transient errors
-     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-       try {
-         const res = await fetch(functionUrl, {
-           method: "POST",
-           headers: {
-             "Content-Type": "application/json",
-             apikey: anonKey,
-             Authorization: `Bearer ${serviceKey}`,
-           },
-           body: JSON.stringify({ jobId, isInternalCall: true }),
-         });
-         
-         if (res.ok || res.status < 500) {
-           // Success or client error (no point retrying)
-           return;
-         }
-         
-         // 5xx error - retry after delay
+   let lastErr: unknown = null;
+
+   // Retry logic for transient errors
+   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+     try {
+       const res = await fetch(functionUrl, {
+         method: "POST",
+         headers: {
+           "Content-Type": "application/json",
+           apikey: anonKey,
+           Authorization: `Bearer ${serviceKey}`,
+         },
+         body: JSON.stringify({ jobId, isInternalCall: true }),
+       });
+
+       if (res.ok) return;
+
+       if (res.status >= 500) {
+         lastErr = new Error(`Self-invoke failed with ${res.status}`);
          console.warn(`Self-invoke attempt ${attempt} failed with ${res.status}, retrying...`);
-         if (attempt < MAX_RETRIES) {
-           await sleep(RETRY_DELAY_MS * attempt);
-         }
-       } catch (err) {
-         console.warn(`Self-invoke attempt ${attempt} error:`, err);
-         if (attempt < MAX_RETRIES) {
-           await sleep(RETRY_DELAY_MS * attempt);
-         }
+         if (attempt < MAX_RETRIES) await sleep(RETRY_DELAY_MS * attempt);
+         continue;
        }
+
+       // Client error - don't retry
+       lastErr = new Error(`Self-invoke failed with ${res.status}`);
+       break;
+     } catch (err) {
+       lastErr = err;
+       console.warn(`Self-invoke attempt ${attempt} error:`, err);
+       if (attempt < MAX_RETRIES) await sleep(RETRY_DELAY_MS * attempt);
      }
-     console.error("All self-invoke retries failed");
-  } catch (error) {
-    console.error("Failed to invoke next batch:", error);
-  }
+   }
+
+   if (opts?.throwOnFailure) {
+     throw lastErr instanceof Error ? lastErr : new Error("Self-invoke failed");
+   }
+   console.error("All self-invoke retries failed", lastErr);
 }
 
  async function processNextBatch(
@@ -313,7 +411,13 @@ const BATCH_SIZE = 1;
      }
 
       // Self-invoke for next page (non-blocking)
-      await invokeNextBatch(jobId, supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, serviceKey);
+       await invokeNextBatch(
+         jobId,
+         supabaseUrl,
+         Deno.env.get("SUPABASE_ANON_KEY")!,
+         serviceKey,
+         { throwOnFailure: true }
+       );
    } catch (error) {
      console.error(`Export batch error for job ${jobId}:`, error);
      await supabase
