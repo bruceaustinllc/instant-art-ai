@@ -291,6 +291,13 @@ function isTransient(message: string): boolean {
     m.includes("internal server error") ||
     m.includes("error code 500") ||
     m.includes(" 500") ||
+    // Gateway/proxy timeouts often surface during self-invoke chaining.
+    m.includes("504") ||
+    m.includes("gateway timeout") ||
+    m.includes("502") ||
+    m.includes("bad gateway") ||
+    m.includes("503") ||
+    m.includes("service unavailable") ||
     m.includes("timeout") ||
     m.includes("timed out") ||
     m.includes("econnreset") ||
