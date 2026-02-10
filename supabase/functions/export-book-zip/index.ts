@@ -26,22 +26,31 @@ const BATCH_SIZE = 1;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
  
    try {
-     const body = await req.json();
-     const { bookId, bookTitle, jobId, isInternalCall } = body;
- 
-      // Internal calls (background processing): require service-role auth
-      if (isInternalCall) {
-        const authHeader = req.headers.get("Authorization") || "";
-        if (authHeader !== `Bearer ${supabaseServiceKey}`) {
-          return new Response(JSON.stringify({ error: "Unauthorized" }), {
-            status: 401,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-      }
+    const body = await req.json();
+      const { bookId, bookTitle, jobId } = body;
 
-      // External calls (user-initiated): require user auth
-      if (!isInternalCall) {
+       // Determine auth type from the Authorization header itself, not client flags
+       const authHeader = req.headers.get("Authorization") || "";
+       const isServiceRoleCall = authHeader === `Bearer ${supabaseServiceKey}`;
+       const isUserCall = authHeader.startsWith("Bearer ") && !isServiceRoleCall;
+
+       if (!isServiceRoleCall && !isUserCall) {
+         return new Response(JSON.stringify({ error: "Unauthorized" }), {
+           status: 401,
+           headers: { ...corsHeaders, "Content-Type": "application/json" },
+         });
+       }
+
+       // Service-role calls: process background job
+       if (isServiceRoleCall && jobId) {
+         await processNextBatch(jobId, supabaseUrl, supabaseServiceKey);
+         return new Response(JSON.stringify({ success: true }), {
+           headers: { ...corsHeaders, "Content-Type": "application/json" },
+         });
+       }
+
+       // User-initiated calls: require user auth
+       if (isUserCall) {
        const authHeader = req.headers.get("Authorization");
        if (!authHeader?.startsWith("Bearer ")) {
          return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -238,19 +247,11 @@ const BATCH_SIZE = 1;
          }
        );
      }
- 
-     // Internal call - process next batch
-     if (jobId) {
-       await processNextBatch(jobId, supabaseUrl, supabaseServiceKey);
-       return new Response(JSON.stringify({ success: true }), {
-         headers: { ...corsHeaders, "Content-Type": "application/json" },
-       });
-     }
- 
-     return new Response(JSON.stringify({ error: "Invalid request" }), {
-       status: 400,
-       headers: { ...corsHeaders, "Content-Type": "application/json" },
-     });
+
+      return new Response(JSON.stringify({ error: "Invalid request" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
    } catch (error) {
      console.error("Export error:", error);
      return new Response(
@@ -343,7 +344,7 @@ async function withRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
            apikey: anonKey,
            Authorization: `Bearer ${serviceKey}`,
          },
-         body: JSON.stringify({ jobId, isInternalCall: true }),
+         body: JSON.stringify({ jobId }),
        });
 
        if (res.ok) return;

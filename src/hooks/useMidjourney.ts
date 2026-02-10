@@ -25,7 +25,7 @@ export const useMidjourney = () => {
     });
 
     try {
-      const { data, error } = await supabase.functions.invoke('midjourney-generate', {
+      const { data, error } = await supabase.functions.invoke('generate-coloring-page', {
         body: { action: 'imagine', prompt },
       });
 
