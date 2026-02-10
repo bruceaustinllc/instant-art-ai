@@ -36,9 +36,35 @@ serve(async (req) => {
       });
     }
 
-    const { prompt, action } = await req.json();
+    const body = await req.json();
+    const { prompt, action } = body;
 
-    console.log("Request received:", { action, prompt });
+    // Validate action parameter
+    const validActions = ["imagine", "status", "upscale"];
+    if (!action || typeof action !== "string" || !validActions.includes(action)) {
+      return new Response(JSON.stringify({ error: "Invalid action" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Validate prompt for imagine action
+    if (action === "imagine") {
+      if (!prompt || typeof prompt !== "string") {
+        return new Response(JSON.stringify({ error: "Prompt is required" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (prompt.length > 2000) {
+        return new Response(JSON.stringify({ error: "Prompt too long (max 2000 characters)" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
+    console.log("Request received:", { action, promptLength: prompt?.length });
 
     if (action === "imagine") {
       const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
