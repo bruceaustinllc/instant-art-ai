@@ -8,23 +8,57 @@ export const useAuth = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let retryCount = 0;
+
     // Set up auth state listener FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
+        retryCount = 0;
       }
     );
 
     // Then get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (error || (!session && localStorage.getItem(`sb-euhevsyahruqehiqgway-auth-token`))) {
+        // Stale token detected — clear it and reset state
+        console.warn('Stale session detected, clearing local auth data');
+        localStorage.removeItem(`sb-euhevsyahruqehiqgway-auth-token`);
+        supabase.auth.signOut().catch(() => {});
+        setSession(null);
+        setUser(null);
+      } else {
+        setSession(session);
+        setUser(session?.user ?? null);
+      }
       setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    // Listen for fetch failures on token refresh and auto-clear
+    const interval = setInterval(async () => {
+      const { error } = await supabase.auth.getSession();
+      if (error) {
+        retryCount++;
+        if (retryCount >= 2) {
+          console.warn('Persistent auth failure detected, clearing stale session');
+          localStorage.removeItem(`sb-euhevsyahruqehiqgway-auth-token`);
+          await supabase.auth.signOut().catch(() => {});
+          setSession(null);
+          setUser(null);
+          setLoading(false);
+          retryCount = 0;
+        }
+      } else {
+        retryCount = 0;
+      }
+    }, 30000);
+
+    return () => {
+      subscription.unsubscribe();
+      clearInterval(interval);
+    };
   }, []);
 
   const signUp = useCallback(async (email: string, password: string) => {
