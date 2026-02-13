@@ -5,10 +5,10 @@
  const MAX_RETRIES = 3;
  const RETRY_DELAY_MS = 1000;
  
- const corsHeaders = {
+const corsHeaders = {
    "Access-Control-Allow-Origin": "*",
    "Access-Control-Allow-Headers":
-     "authorization, x-client-info, apikey, content-type",
+     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
  };
  
 // NOTE: book_pages.image_url currently stores base64 data URLs for many users.
