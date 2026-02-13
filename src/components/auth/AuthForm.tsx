@@ -6,9 +6,11 @@ import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { lovable } from '@/integrations/lovable/index';
 import { Loader2, BookOpen, Palette } from 'lucide-react';
+import ForgotPasswordForm from './ForgotPasswordForm';
 
 const AuthForm = () => {
   const [isLogin, setIsLogin] = useState(true);
+  const [showForgot, setShowForgot] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -46,6 +48,10 @@ const AuthForm = () => {
       setLoading(false);
     }
   };
+
+  if (showForgot) {
+    return <ForgotPasswordForm onBack={() => setShowForgot(false)} />;
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
@@ -122,6 +128,19 @@ const AuthForm = () => {
               )}
             </Button>
           </form>
+
+          {isLogin && (
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={() => setShowForgot(true)}
+                className="text-sm text-muted-foreground hover:text-primary hover:underline"
+                disabled={loading}
+              >
+                Forgot your password?
+              </button>
+            </div>
+          )}
 
           <div className="relative flex items-center my-2">
             <div className="flex-grow border-t border-border"></div>
