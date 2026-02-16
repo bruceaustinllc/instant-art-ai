@@ -3,17 +3,6 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './useAuth';
 import type { TablesUpdate } from '@/integrations/supabase/types';
 
-const ANON_USER_ID_KEY = 'coloring-book-anon-user-id';
-
-function getOrCreateAnonUserId(): string {
-  let id = localStorage.getItem(ANON_USER_ID_KEY);
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem(ANON_USER_ID_KEY, id);
-  }
-  return id;
-}
-
 export interface ColoringBook {
   id: string;
   user_id: string;
@@ -45,7 +34,7 @@ export interface BookPage {
 
 export const useColoringBooks = () => {
   const { user } = useAuth();
-  const effectiveUserId = user?.id || getOrCreateAnonUserId();
+  const effectiveUserId = user?.id;
   const [books, setBooks] = useState<ColoringBook[]>([]);
   const [currentBook, setCurrentBook] = useState<ColoringBook | null>(null);
   const [pages, setPages] = useState<BookPage[]>([]);
@@ -68,11 +57,13 @@ export const useColoringBooks = () => {
   });
 
   const fetchBooks = useCallback(async () => {
+    if (!effectiveUserId) return;
     setLoading(true);
     try {
       const { data, error } = await supabase
         .from('coloring_books')
         .select('*')
+        .eq('user_id', effectiveUserId)
         .order('updated_at', { ascending: false });
 
       if (error) throw error;
@@ -190,6 +181,7 @@ export const useColoringBooks = () => {
   }, [pagesHasMore, pagesLoadingMore]);
 
   const createBook = useCallback(async (title: string, description?: string) => {
+    if (!effectiveUserId) return null;
     try {
       const { data, error } = await supabase
         .from('coloring_books')
