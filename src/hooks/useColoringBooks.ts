@@ -3,6 +3,17 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './useAuth';
 import type { TablesUpdate } from '@/integrations/supabase/types';
 
+const ANON_USER_ID_KEY = 'coloring-book-anon-user-id';
+
+function getOrCreateAnonUserId(): string {
+  let id = localStorage.getItem(ANON_USER_ID_KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(ANON_USER_ID_KEY, id);
+  }
+  return id;
+}
+
 export interface ColoringBook {
   id: string;
   user_id: string;
@@ -34,6 +45,7 @@ export interface BookPage {
 
 export const useColoringBooks = () => {
   const { user } = useAuth();
+  const effectiveUserId = user?.id || getOrCreateAnonUserId();
   const [books, setBooks] = useState<ColoringBook[]>([]);
   const [currentBook, setCurrentBook] = useState<ColoringBook | null>(null);
   const [pages, setPages] = useState<BookPage[]>([]);
@@ -56,7 +68,6 @@ export const useColoringBooks = () => {
   });
 
   const fetchBooks = useCallback(async () => {
-    if (!user) return;
     setLoading(true);
     try {
       const { data, error } = await supabase
@@ -71,7 +82,7 @@ export const useColoringBooks = () => {
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [effectiveUserId]);
 
   const fetchPages = useCallback(async (bookId: string) => {
     // NOTE: Some books can have very large image_url payloads.
@@ -179,12 +190,11 @@ export const useColoringBooks = () => {
   }, [pagesHasMore, pagesLoadingMore]);
 
   const createBook = useCallback(async (title: string, description?: string) => {
-    if (!user) return null;
     try {
       const { data, error } = await supabase
         .from('coloring_books')
         .insert({
-          user_id: user.id,
+          user_id: effectiveUserId,
           title,
           description,
           page_size: '8.5x11',
@@ -200,10 +210,10 @@ export const useColoringBooks = () => {
       console.error('Error creating book:', err);
       return null;
     }
-  }, [user]);
+  }, [effectiveUserId]);
 
   const updateBook = useCallback(async (bookId: string, updates: Partial<Omit<ColoringBook, 'id' | 'user_id' | 'created_at'>>) => {
-    if (!user) return null;
+    if (!effectiveUserId) return null;
     try {
       const { data, error } = await supabase
         .from('coloring_books')
@@ -238,7 +248,7 @@ export const useColoringBooks = () => {
     imageUrl: string,
     artStyle: string = 'line_art'
   ) => {
-    if (!user) return null;
+    if (!effectiveUserId) return null;
     try {
       // Get next page number
       const nextPageNumber = pages.length + 1;
@@ -247,7 +257,7 @@ export const useColoringBooks = () => {
         .from('book_pages')
         .insert({
           book_id: bookId,
-          user_id: user.id,
+          user_id: effectiveUserId,
           prompt,
           image_url: imageUrl,
           page_number: nextPageNumber,
